@@ -563,26 +563,13 @@ export default function AppPage() {
             </button>
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
               {brokenAccounts.size > 0 && (
-                <button onClick={() => setShowBroken(p => !p)} style={{ display:'flex', alignItems:'center', gap:4, padding:'3px 8px', borderRadius:6, border:`1px solid ${showBroken ? 'rgba(239,68,68,0.4)' : 'rgba(239,68,68,0.15)'}`, background: showBroken ? 'rgba(239,68,68,0.12)' : 'transparent', color:'#f87171', fontSize:10, fontWeight:700, cursor:'pointer' }}>
+                <button onClick={() => router.push('/broken')} style={{ display:'flex', alignItems:'center', gap:4, padding:'3px 8px', borderRadius:6, border:'1px solid rgba(239,68,68,0.3)', background:'rgba(239,68,68,0.08)', color:'#f87171', fontSize:10, fontWeight:700, cursor:'pointer' }}>
                   ⚠️ تالف ({brokenAccounts.size})
                 </button>
               )}
               {activatedAccounts.size > 0 && <span style={{ color: C.green, fontWeight:600, fontSize:11 }}>✓ {activatedAccounts.size}</span>}
             </div>
           </div>
-
-          {/* Broken Accounts Section */}
-          {showBroken && brokenAccounts.size > 0 && (
-            <div style={{ borderTop:`1px solid rgba(239,68,68,0.2)`, background:'rgba(239,68,68,0.03)', padding:'8px', maxHeight:200, overflowY:'auto' }}>
-              <p style={{ fontSize:10, fontWeight:700, color:'#f87171', letterSpacing:'0.06em', marginBottom:6, paddingLeft:4 }}>⚠️ الأكونتات التالفة</p>
-              {accounts.filter(a => brokenAccounts.has(a.id)).map(acc => (
-                <div key={acc.id} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 8px', borderRadius:8, marginBottom:2, background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.1)' }}>
-                  <span style={{ fontSize:11, color:'#fca5a5', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{acc.email}</span>
-                  <button onClick={e => toggleBroken(acc.id, acc.email, e)} title="استعادة الأكونت" style={{ padding:'2px 7px', borderRadius:5, border:'1px solid rgba(16,185,129,0.3)', background:'rgba(16,185,129,0.08)', color: C.green, fontSize:10, fontWeight:700, cursor:'pointer' }}>↩ استعادة</button>
-                </div>
-              ))}
-            </div>
-          )}
 
           {/* ── Navigation ── */}
           <div style={{ padding:'12px 16px', borderTop:`1px solid ${C.border}`, background:'rgba(0,0,0,0.2)' }}>
