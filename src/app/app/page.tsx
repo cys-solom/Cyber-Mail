@@ -50,9 +50,14 @@ export default function AppPage() {
   const [plusTagged, setPlusTagged] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('ds_plus1') || '[]')); } catch { return new Set(); }
   });
+  const [authCodes, setAuthCodes] = useState<Record<string,string>>(() => {
+    try { return JSON.parse(localStorage.getItem('ds_auth_codes') || '{}'); } catch { return {}; }
+  });
+  const [showAuthInput, setShowAuthInput] = useState<string|null>(null); // account id
+  const [authInputVal,  setAuthInputVal]  = useState('');
   const [showExport,    setShowExport]      = useState(false);
   const [exportCopied,  setExportCopied]    = useState(false);
-  const [exportData,    setExportData]      = useState<{email:string;password:string;originalEmail?:string;isPlusTagged?:boolean}[]>([]);
+  const [exportData,    setExportData]      = useState<{email:string;password:string;authCode?:string;originalEmail?:string;isPlusTagged?:boolean}[]>([]);
   const [loadingExport, setLoadingExport]   = useState(false);
   const [openMessage,   setOpenMessage]     = useState<MailMessage|null>(null);
   const [credentials,   setCredentials]     = useState<{email:string;password:string}|null>(null);
@@ -301,7 +306,10 @@ export default function AppPage() {
     localStorage.removeItem('ds_currentIndex');
     localStorage.removeItem('ds_activated');
     localStorage.removeItem('ds_plus1');
+    localStorage.removeItem('ds_auth_codes');
     setPlusTagged(new Set());
+    setAuthCodes({});
+    setShowAuthInput(null);
   };
 
   // ── Export ──────────────────────────────────────────
@@ -320,7 +328,8 @@ export default function AppPage() {
             const exportEmail = plusTagged.has(acc.id)
               ? acc.email.replace('@', '+1@')
               : acc.email;
-            return { email: exportEmail, password: data.success ? data.data.password : '???', originalEmail: acc.email, isPlusTagged: plusTagged.has(acc.id) };
+            const authCode = authCodes[acc.id] || undefined;
+            return { email: exportEmail, password: data.success ? data.data.password : '???', originalEmail: acc.email, isPlusTagged: plusTagged.has(acc.id), authCode };
           } catch { return { email: acc.email, password: '???', originalEmail: acc.email, isPlusTagged: false }; }
         })
       );
@@ -338,7 +347,28 @@ export default function AppPage() {
     });
   };
 
-  const exportText = exportData.map(d => `${d.email}|${d.password}`).join('\n');
+  const openAuthInput = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (showAuthInput === id) { setShowAuthInput(null); return; }
+    setAuthInputVal(authCodes[id] || '');
+    setShowAuthInput(id);
+  };
+
+  const saveAuthCode = (id: string) => {
+    const val = authInputVal.trim();
+    setAuthCodes(prev => {
+      const next = { ...prev };
+      if (val) next[id] = val; else delete next[id];
+      localStorage.setItem('ds_auth_codes', JSON.stringify(next));
+      return next;
+    });
+    setShowAuthInput(null);
+  };
+
+  const exportText = exportData.map(d => {
+    const base = `${d.email}|${d.password}`;
+    return d.authCode ? `${base}|${d.authCode}` : base;
+  }).join('\n');
   const copyExport = () => { navigator.clipboard.writeText(exportText); setExportCopied(true); setTimeout(() => setExportCopied(false), 2000); };
   const downloadTxt = () => {
     const blob = new Blob([exportText], { type:'text/plain' });
@@ -438,27 +468,50 @@ export default function AppPage() {
                 const isUsed      = usedAccounts.has(acc.id);
                 const isActivated = activatedAccounts.has(acc.id);
                 const isPlus      = plusTagged.has(acc.id);
+                const hasAuth     = !!authCodes[acc.id];
                 return (
-                  <div key={acc.id} onClick={() => selectAccount(idx)} style={{
-                    display:'flex', alignItems:'center', gap:6, padding:'9px 10px', borderRadius:10, cursor:'pointer', marginBottom:2, transition:'all 0.15s',
-                    background: isSelected ? 'rgba(59,130,246,0.1)' : isActivated ? 'rgba(16,185,129,0.05)' : 'transparent',
-                    border: `1px solid ${isSelected ? 'rgba(59,130,246,0.2)' : isActivated ? 'rgba(16,185,129,0.12)' : 'transparent'}`,
-                  }}>
-                    {/* Status dot */}
-                    <div style={{ width:7, height:7, borderRadius:'50%', flexShrink:0, background: isSelected ? C.blue : isActivated ? C.green : isUsed ? C.amber : C.text3, boxShadow: isSelected ? `0 0 8px ${C.blue}` : isActivated ? `0 0 8px ${C.green}` : 'none', transition:'all 0.2s' }} />
-                    {/* Email */}
-                    <span style={{ flex:1, fontSize:12, fontWeight: isSelected || isActivated ? 600 : 400, color: isSelected ? '#93c5fd' : isActivated ? '#6ee7b7' : C.text2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{acc.email}</span>
-                    {/* +1 tag toggle */}
-                    <button onClick={e => togglePlusTag(acc.id, e)} title={isPlus ? 'إلغاء +1' : 'تعليم بـ +1 في التصدير'} style={{ width:20, height:20, borderRadius:5, border:`1px solid ${isPlus ? 'rgba(251,146,60,0.4)' : C.border}`, background: isPlus ? 'rgba(251,146,60,0.15)' : 'rgba(255,255,255,0.03)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', flexShrink:0, transition:'all 0.15s' }}>
-                      <span style={{ fontSize:9, fontWeight:800, color: isPlus ? '#fb923c' : C.text3, lineHeight:1 }}>+1</span>
-                    </button>
-                    {/* Activate toggle */}
-                    <button onClick={e => toggleActivated(acc.id, e)} title={isActivated ? 'Click to deactivate' : 'Mark as activated'} style={{ width:20, height:20, borderRadius:5, border:`1px solid ${isActivated ? 'rgba(16,185,129,0.3)' : C.border}`, background: isActivated ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.03)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', flexShrink:0, transition:'all 0.15s' }}>
-                      {isActivated ? <Check style={{ width:10, height:10, color: C.green }} /> : <Plus style={{ width:9, height:9, color: C.text3 }} />}
-                    </button>
-                    {/* Used badge */}
-                    {isUsed && (
-                      <button onClick={e => toggleUsed(acc.id, e)} style={{ padding:'1px 5px', borderRadius:4, fontSize:9, fontWeight:700, background:'rgba(245,158,11,0.1)', border:'1px solid rgba(245,158,11,0.15)', color: C.amber, cursor:'pointer', flexShrink:0 }}>USED</button>
+                  <div key={acc.id} style={{ marginBottom:2 }}>
+                    <div onClick={() => selectAccount(idx)} style={{
+                      display:'flex', alignItems:'center', gap:6, padding:'9px 10px', borderRadius:showAuthInput===acc.id ? '10px 10px 0 0' : 10, cursor:'pointer', transition:'all 0.15s',
+                      background: isSelected ? 'rgba(59,130,246,0.1)' : isActivated ? 'rgba(16,185,129,0.05)' : 'transparent',
+                      border: `1px solid ${isSelected ? 'rgba(59,130,246,0.2)' : isActivated ? 'rgba(16,185,129,0.12)' : showAuthInput===acc.id ? 'rgba(168,85,247,0.25)' : 'transparent'}`,
+                      borderBottom: showAuthInput===acc.id ? 'none' : undefined,
+                    }}>
+                      {/* Status dot */}
+                      <div style={{ width:7, height:7, borderRadius:'50%', flexShrink:0, background: isSelected ? C.blue : isActivated ? C.green : isUsed ? C.amber : C.text3, boxShadow: isSelected ? `0 0 8px ${C.blue}` : isActivated ? `0 0 8px ${C.green}` : 'none', transition:'all 0.2s' }} />
+                      {/* Email */}
+                      <span style={{ flex:1, fontSize:12, fontWeight: isSelected || isActivated ? 600 : 400, color: isSelected ? '#93c5fd' : isActivated ? '#6ee7b7' : C.text2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{acc.email}</span>
+                      {/* AUTH button */}
+                      <button onClick={e => openAuthInput(acc.id, e)} title={hasAuth ? `Auth: ${authCodes[acc.id]}` : 'إضافة Auth Code'} style={{ width:20, height:20, borderRadius:5, border:`1px solid ${hasAuth || showAuthInput===acc.id ? 'rgba(168,85,247,0.4)' : C.border}`, background: hasAuth || showAuthInput===acc.id ? 'rgba(168,85,247,0.15)' : 'rgba(255,255,255,0.03)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', flexShrink:0, transition:'all 0.15s' }}>
+                        <span style={{ fontSize:8, fontWeight:800, color: hasAuth || showAuthInput===acc.id ? '#c084fc' : C.text3, lineHeight:1 }}>AUTH</span>
+                      </button>
+                      {/* +1 tag toggle */}
+                      <button onClick={e => togglePlusTag(acc.id, e)} title={isPlus ? 'إلغاء +1' : 'تعليم بـ +1 في التصدير'} style={{ width:20, height:20, borderRadius:5, border:`1px solid ${isPlus ? 'rgba(251,146,60,0.4)' : C.border}`, background: isPlus ? 'rgba(251,146,60,0.15)' : 'rgba(255,255,255,0.03)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', flexShrink:0, transition:'all 0.15s' }}>
+                        <span style={{ fontSize:9, fontWeight:800, color: isPlus ? '#fb923c' : C.text3, lineHeight:1 }}>+1</span>
+                      </button>
+                      {/* Activate toggle */}
+                      <button onClick={e => toggleActivated(acc.id, e)} title={isActivated ? 'Click to deactivate' : 'Mark as activated'} style={{ width:20, height:20, borderRadius:5, border:`1px solid ${isActivated ? 'rgba(16,185,129,0.3)' : C.border}`, background: isActivated ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.03)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', flexShrink:0, transition:'all 0.15s' }}>
+                        {isActivated ? <Check style={{ width:10, height:10, color: C.green }} /> : <Plus style={{ width:9, height:9, color: C.text3 }} />}
+                      </button>
+                      {/* Used badge */}
+                      {isUsed && (
+                        <button onClick={e => toggleUsed(acc.id, e)} style={{ padding:'1px 5px', borderRadius:4, fontSize:9, fontWeight:700, background:'rgba(245,158,11,0.1)', border:'1px solid rgba(245,158,11,0.15)', color: C.amber, cursor:'pointer', flexShrink:0 }}>USED</button>
+                      )}
+                    </div>
+                    {/* Auth input panel */}
+                    {showAuthInput === acc.id && (
+                      <div onClick={e => e.stopPropagation()} style={{ padding:'8px 10px', background:'rgba(168,85,247,0.05)', border:'1px solid rgba(168,85,247,0.25)', borderTop:'none', borderRadius:'0 0 10px 10px', display:'flex', gap:6 }}>
+                        <input
+                          autoFocus
+                          value={authInputVal}
+                          onChange={e => setAuthInputVal(e.target.value)}
+                          onKeyDown={e => { if(e.key==='Enter') saveAuthCode(acc.id); if(e.key==='Escape') setShowAuthInput(null); }}
+                          placeholder="اكتب Auth Code..."
+                          style={{ flex:1, padding:'5px 9px', borderRadius:7, border:'1px solid rgba(168,85,247,0.3)', background:'rgba(0,0,0,0.3)', color:'#e2e8f0', fontSize:12, fontFamily:"'JetBrains Mono',monospace", outline:'none' }}
+                        />
+                        <button onClick={() => saveAuthCode(acc.id)} style={{ padding:'5px 10px', borderRadius:7, border:'none', background:'rgba(168,85,247,0.2)', color:'#c084fc', fontSize:11, fontWeight:700, cursor:'pointer' }}>حفظ</button>
+                        {authCodes[acc.id] && <button onClick={() => { setAuthInputVal(''); saveAuthCode(acc.id); }} style={{ padding:'5px 8px', borderRadius:7, border:'none', background:'rgba(239,68,68,0.1)', color:'#fca5a5', fontSize:11, cursor:'pointer' }}>✕</button>}
+                      </div>
                     )}
                   </div>
                 );
@@ -779,6 +832,7 @@ export default function AppPage() {
                       <div style={{ flex:1, minWidth:0, display:'flex', alignItems:'center', gap:6 }}>
                         <span style={{ fontSize:12, color:'#6ee7b7', fontFamily:"'JetBrains Mono', monospace", fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.email}</span>
                         {item.isPlusTagged && <span style={{ fontSize:9, fontWeight:800, color:'#fb923c', background:'rgba(251,146,60,0.15)', border:'1px solid rgba(251,146,60,0.3)', borderRadius:4, padding:'1px 5px', flexShrink:0 }}>+1</span>}
+                        {item.authCode && <span style={{ fontSize:9, fontWeight:800, color:'#c084fc', background:'rgba(168,85,247,0.12)', border:'1px solid rgba(168,85,247,0.3)', borderRadius:4, padding:'1px 5px', flexShrink:0, fontFamily:"'JetBrains Mono',monospace" }}>{item.authCode}</span>}
                       </div>
                       <span style={{ fontSize:12, color: C.text3, fontFamily:"'JetBrains Mono', monospace" }}>|</span>
                       <span style={{ fontSize:12, color: C.text2, fontFamily:"'JetBrains Mono', monospace", flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.password}</span>
