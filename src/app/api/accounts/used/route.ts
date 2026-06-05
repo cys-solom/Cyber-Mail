@@ -7,7 +7,8 @@ export async function GET() {
   const isAdmin = await verifyAdminSession();
   if (!isAdmin) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
-  return NextResponse.json({ success: true, used_ids: accountsStore.usedIds() });
+  const ids = await accountsStore.usedIds();
+  return NextResponse.json({ success: true, used_ids: ids });
 }
 
 // POST — Toggle used status
@@ -22,7 +23,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: 'account_id and is_used (boolean) required' }, { status: 400 });
   }
 
-  accountsStore.update(account_id, { is_used });
+  await accountsStore.update(account_id, { is_used });
   return NextResponse.json({ success: true });
 }
 
@@ -31,6 +32,6 @@ export async function DELETE() {
   const isAdmin = await verifyAdminSession();
   if (!isAdmin) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
-  accountsStore.clearUsed();
+  await accountsStore.clearUsed();
   return NextResponse.json({ success: true });
 }

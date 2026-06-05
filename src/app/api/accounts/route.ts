@@ -8,11 +8,11 @@ export async function GET() {
   const isAdmin = await verifyAdminSession();
   if (!isAdmin) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
-  const data = accountsStore.findAll();
+  const data = await accountsStore.findAll();
   return NextResponse.json({ success: true, data, count: data.length });
 }
 
-// POST — Create account
+// POST — Create single account
 export async function POST(request: NextRequest) {
   const isAdmin = await verifyAdminSession();
   if (!isAdmin) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: 'Missing required fields' }, { status: 400 });
   }
 
-  const data = accountsStore.insert({
+  const data = await accountsStore.insert({
     email,
     encrypted_password: encrypt(password),
     client_id,

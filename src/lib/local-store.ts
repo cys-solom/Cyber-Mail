@@ -1,48 +1,73 @@
 /**
- * LOCAL STORE — File-Persisted
- * =============================
- * يحل محل Supabase للتشغيل المحلي.
- * البيانات تُحفظ في ملف JSON على الـ disk — تبقى بعد إعادة تشغيل السيرفر.
- * للرجوع إلى بنية قاعدة البيانات الحقيقية، راجع: DATABASE_SCHEMA.md
+ * STORAGE ADAPTER
+ * ===============
+ * - Local dev  → File system (.local-data/accounts.json)
+ * - Vercel     → Vercel KV  (Redis, free tier)
+ *
+ * البنية متوافقة مع Supabase للرجوع إليها مستقبلاً.
  */
 
 import crypto from 'crypto';
-import fs   from 'fs';
-import path from 'path';
 import type { EmailAccount, MailMessage, OTPResult, QueueSession, AuditLog, AppSettings, AccountStatus } from '@/types';
 
+// ─── Types ─────────────────────────────────────────────────────────────────
+
+type AccountRecord = EmailAccount & {
+  encrypted_password: string;
+  encrypted_refresh_token: string;
+  is_used: boolean;
+};
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
 function uuid(): string  { return crypto.randomUUID(); }
-function now(): string   { return new Date().toISOString(); }
+function now():  string  { return new Date().toISOString(); }
 
-// ─── Persistence ────────────────────────────────────────────────────────────
+// ─── Storage Backend (lazy loaded) ──────────────────────────────────────────
 
-const DATA_DIR  = path.join(process.cwd(), '.local-data');
-const DATA_FILE = path.join(DATA_DIR, 'accounts.json');
+let _backend: StorageBackend | null = null;
 
-function ensureDir() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+async function getBackend(): Promise<StorageBackend> {
+  if (_backend) return _backend;
+  if (process.env.KV_REST_API_URL) {
+    const { KVBackend } = await import('./storage/kv-backend');
+    _backend = new KVBackend();
+  } else {
+    const { FileBackend } = await import('./storage/file-backend');
+    _backend = new FileBackend();
+  }
+  return _backend;
 }
 
-function loadAccounts(): typeof db.email_accounts {
-  try {
-    ensureDir();
-    if (!fs.existsSync(DATA_FILE)) return [];
-    const raw = fs.readFileSync(DATA_FILE, 'utf-8');
-    return JSON.parse(raw) || [];
-  } catch { return []; }
+export interface StorageBackend {
+  loadAccounts(): Promise<AccountRecord[]>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  saveAccounts(accounts: any[]): Promise<void>;
 }
 
-function saveAccounts() {
-  try {
-    ensureDir();
-    fs.writeFileSync(DATA_FILE, JSON.stringify(db.email_accounts, null, 2), 'utf-8');
-  } catch (err) { console.error('[local-store] Failed to save:', err); }
+// ─── In-Process Cache ────────────────────────────────────────────────────────
+// Avoids hitting storage on every request within the same Node.js process.
+
+let _cache: AccountRecord[] | null = null;
+let _cacheLoaded = false;
+
+async function getAccounts(): Promise<AccountRecord[]> {
+  if (_cacheLoaded && _cache !== null) return _cache;
+  const backend = await getBackend();
+  _cache = await backend.loadAccounts();
+  _cacheLoaded = true;
+  return _cache;
 }
 
-// ─── Tables ────────────────────────────────────────────────────────────────
+async function persistAccounts(): Promise<void> {
+  if (!_cache) return;
+  const backend = await getBackend();
+  await backend.saveAccounts(_cache);
+}
+
+// ─── In-Memory Tables (non-persisted) ───────────────────────────────────────
 
 export const db = {
-  email_accounts: loadAccounts() as (EmailAccount & { encrypted_password: string; encrypted_refresh_token: string; is_used: boolean })[],
   mail_messages:  [] as MailMessage[],
   otp_results:    [] as OTPResult[],
   queue_sessions: [] as QueueSession[],
@@ -50,109 +75,111 @@ export const db = {
   settings:       [] as AppSettings[],
 };
 
-// ─── email_accounts helpers ────────────────────────────────────────────────
+// ─── accountsStore ──────────────────────────────────────────────────────────
 
 export const accountsStore = {
-  findAll() {
-    return [...db.email_accounts].sort(
+  async findAll(): Promise<AccountRecord[]> {
+    const all = await getAccounts();
+    return [...all].sort(
       (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     );
   },
 
-  findById(id: string) {
-    return db.email_accounts.find((a) => a.id === id) ?? null;
+  async findById(id: string): Promise<AccountRecord | null> {
+    const all = await getAccounts();
+    return all.find(a => a.id === id) ?? null;
   },
 
-  insert(data: {
+  async insert(data: {
     email: string;
     encrypted_password: string;
     client_id: string;
     encrypted_refresh_token: string;
     status?: AccountStatus;
     health_score?: number;
-  }) {
-    // Prevent duplicate emails
-    const existing = db.email_accounts.find(a => a.email.toLowerCase() === data.email.trim().toLowerCase());
+  }): Promise<AccountRecord> {
+    const all = await getAccounts();
+    const existing = all.find(a => a.email.toLowerCase() === data.email.trim().toLowerCase());
     if (existing) {
-      // Update existing record
       Object.assign(existing, {
-        encrypted_password:       data.encrypted_password,
-        client_id:                data.client_id.trim(),
-        encrypted_refresh_token:  data.encrypted_refresh_token,
-        status:                   data.status ?? 'active',
-        health_score:             data.health_score ?? 100,
-        updated_at:               now(),
+        encrypted_password:      data.encrypted_password,
+        client_id:               data.client_id.trim(),
+        encrypted_refresh_token: data.encrypted_refresh_token,
+        status:                  data.status ?? 'active',
+        health_score:            data.health_score ?? 100,
+        updated_at:              now(),
       });
-      saveAccounts();
+      await persistAccounts();
       return existing;
     }
-
-    const record = {
-      id:                        uuid(),
-      email:                     data.email.trim(),
-      encrypted_password:        data.encrypted_password,
-      client_id:                 data.client_id.trim(),
-      encrypted_refresh_token:   data.encrypted_refresh_token,
-      status:                    (data.status ?? 'active') as AccountStatus,
-      health_score:              data.health_score ?? 100,
-      last_checked_at:           undefined,
-      last_code:                 undefined,
-      last_code_at:              undefined,
-      notes:                     undefined,
-      assigned_to:               undefined,
-      token_expires_at:          undefined,
-      total_fetches:             0,
-      total_otps:                0,
-      is_used:                   false,
-      created_at:                now(),
-      updated_at:                now(),
+    const record: AccountRecord = {
+      id:                       uuid(),
+      email:                    data.email.trim(),
+      encrypted_password:       data.encrypted_password,
+      client_id:                data.client_id.trim(),
+      encrypted_refresh_token:  data.encrypted_refresh_token,
+      status:                   (data.status ?? 'active') as AccountStatus,
+      health_score:             data.health_score ?? 100,
+      last_checked_at:          undefined,
+      last_code:                undefined,
+      last_code_at:             undefined,
+      notes:                    undefined,
+      assigned_to:              undefined,
+      token_expires_at:         undefined,
+      total_fetches:            0,
+      total_otps:               0,
+      is_used:                  false,
+      created_at:               now(),
+      updated_at:               now(),
     };
-    db.email_accounts.push(record);
-    saveAccounts();
+    all.push(record);
+    await persistAccounts();
     return record;
   },
 
-  update(id: string, patch: Record<string, unknown>) {
-    const idx = db.email_accounts.findIndex((a) => a.id === id);
+  async update(id: string, patch: Record<string, unknown>): Promise<AccountRecord | null> {
+    const all = await getAccounts();
+    const idx = all.findIndex(a => a.id === id);
     if (idx === -1) return null;
-    db.email_accounts[idx] = { ...db.email_accounts[idx], ...patch, updated_at: now() };
-    saveAccounts();
-    return db.email_accounts[idx];
+    all[idx] = { ...all[idx], ...patch, updated_at: now() };
+    await persistAccounts();
+    return all[idx];
   },
 
-  delete(id: string) {
-    const idx = db.email_accounts.findIndex((a) => a.id === id);
+  async delete(id: string): Promise<boolean> {
+    const all = await getAccounts();
+    const idx = all.findIndex(a => a.id === id);
     if (idx === -1) return false;
-    db.email_accounts.splice(idx, 1);
-    saveAccounts();
+    all.splice(idx, 1);
+    await persistAccounts();
     return true;
   },
 
-  usedIds() {
-    return db.email_accounts.filter((a) => a.is_used).map((a) => a.id);
+  async usedIds(): Promise<string[]> {
+    const all = await getAccounts();
+    return all.filter(a => a.is_used).map(a => a.id);
   },
 
-  clearUsed() {
-    db.email_accounts.forEach((a) => { a.is_used = false; });
-    saveAccounts();
+  async clearUsed(): Promise<void> {
+    const all = await getAccounts();
+    all.forEach(a => { a.is_used = false; });
+    await persistAccounts();
   },
 };
 
-// ─── mail_messages helpers ─────────────────────────────────────────────────
+// ─── messagesStore (in-memory only) ────────────────────────────────────────
 
 export const messagesStore = {
   findById(id: string) {
-    return db.mail_messages.find((m) => m.id === id) ?? null;
+    return db.mail_messages.find(m => m.id === id) ?? null;
   },
-
   findByGraphId(graphId: string) {
-    return db.mail_messages.find((m) => m.graph_message_id === graphId) ?? null;
+    return db.mail_messages.find(m => m.graph_message_id === graphId) ?? null;
   },
-
   upsert(data: Omit<MailMessage, 'id' | 'created_at' | 'has_otp'> & { graph_message_id?: string }) {
     const existing = data.graph_message_id ? this.findByGraphId(data.graph_message_id) : null;
     if (existing) {
-      const idx = db.mail_messages.findIndex((m) => m.id === existing.id);
+      const idx = db.mail_messages.findIndex(m => m.id === existing.id);
       db.mail_messages[idx] = { ...db.mail_messages[idx], ...data };
       return db.mail_messages[idx];
     }
@@ -160,22 +187,20 @@ export const messagesStore = {
     db.mail_messages.push(record);
     return record;
   },
-
   update(id: string, patch: Partial<MailMessage>) {
-    const idx = db.mail_messages.findIndex((m) => m.id === id);
+    const idx = db.mail_messages.findIndex(m => m.id === id);
     if (idx === -1) return null;
     db.mail_messages[idx] = { ...db.mail_messages[idx], ...patch };
     return db.mail_messages[idx];
   },
 };
 
-// ─── otp_results helpers ───────────────────────────────────────────────────
+// ─── otpStore ───────────────────────────────────────────────────────────────
 
 export const otpStore = {
   findByMessageAndCode(messageId: string, code: string) {
-    return db.otp_results.find((o) => o.message_id === messageId && o.code === code) ?? null;
+    return db.otp_results.find(o => o.message_id === messageId && o.code === code) ?? null;
   },
-
   insert(data: Omit<OTPResult, 'id' | 'extracted_at' | 'status'>) {
     const record: OTPResult = { id: uuid(), extracted_at: now(), status: 'fresh', ...data };
     db.otp_results.push(record);
@@ -183,7 +208,7 @@ export const otpStore = {
   },
 };
 
-// ─── queue_sessions helpers ────────────────────────────────────────────────
+// ─── queueStore ─────────────────────────────────────────────────────────────
 
 export const queueStore = {
   findAll() {
@@ -191,22 +216,20 @@ export const queueStore = {
       .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
       .slice(0, 20);
   },
-
   insert() {
     const record: QueueSession = { id: uuid(), user_id: 'local', started_at: now(), accounts_processed: 0, otps_found: 0, status: 'active' };
     db.queue_sessions.push(record);
     return record;
   },
-
   update(id: string, patch: Partial<QueueSession>) {
-    const idx = db.queue_sessions.findIndex((q) => q.id === id);
+    const idx = db.queue_sessions.findIndex(q => q.id === id);
     if (idx === -1) return null;
     db.queue_sessions[idx] = { ...db.queue_sessions[idx], ...patch };
     return db.queue_sessions[idx];
   },
 };
 
-// ─── audit_logs helpers ────────────────────────────────────────────────────
+// ─── logsStore ──────────────────────────────────────────────────────────────
 
 export const logsStore = {
   findAll(limit = 100) {
@@ -214,7 +237,6 @@ export const logsStore = {
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
       .slice(0, limit);
   },
-
   insert(data: Omit<AuditLog, 'id' | 'created_at'>) {
     const record: AuditLog = { id: uuid(), created_at: now(), ...data };
     db.audit_logs.push(record);
@@ -222,17 +244,13 @@ export const logsStore = {
   },
 };
 
-// ─── settings helpers ──────────────────────────────────────────────────────
+// ─── settingsStore ──────────────────────────────────────────────────────────
 
 export const settingsStore = {
   findAll() { return [...db.settings]; },
-
   upsert(key: string, value: Record<string, unknown>) {
-    const idx = db.settings.findIndex((s) => s.key === key);
-    if (idx !== -1) {
-      db.settings[idx] = { key, value, updated_at: now() };
-      return db.settings[idx];
-    }
+    const idx = db.settings.findIndex(s => s.key === key);
+    if (idx !== -1) { db.settings[idx] = { key, value, updated_at: now() }; return db.settings[idx]; }
     const record: AppSettings = { key, value, updated_at: now() };
     db.settings.push(record);
     return record;

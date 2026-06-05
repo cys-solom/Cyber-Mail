@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: 'account_id required' }, { status: 400 });
   }
 
-  const account = accountsStore.findById(account_id);
+  const account = await accountsStore.findById(account_id);
   if (!account) {
     return NextResponse.json({ success: false, error: 'Account not found' }, { status: 404 });
   }
@@ -26,9 +26,8 @@ export async function POST(request: NextRequest) {
     const refreshToken = decrypt(account.encrypted_refresh_token);
     const tokenData = await refreshAccessToken(account.client_id, refreshToken);
 
-    // If we got a new refresh token, store it
     if (tokenData.refresh_token && tokenData.refresh_token !== refreshToken) {
-      accountsStore.update(account_id, {
+      await accountsStore.update(account_id, {
         encrypted_refresh_token: encrypt(tokenData.refresh_token),
         token_expires_at: new Date(Date.now() + tokenData.expires_in * 1000).toISOString(),
       });
@@ -75,7 +74,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    accountsStore.update(account_id, {
+    await accountsStore.update(account_id, {
       last_checked_at: new Date().toISOString(),
       last_code: otps.length > 0 ? otps[0].code : account.last_code,
       last_code_at: otps.length > 0 ? new Date().toISOString() : account.last_code_at,
@@ -86,7 +85,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, data: { messages, otps, account_id } });
   } catch (err: unknown) {
-    accountsStore.update(account_id, {
+    await accountsStore.update(account_id, {
       status: 'failed',
       health_score: Math.max(0, (account.health_score || 100) - 10),
       last_checked_at: new Date().toISOString(),

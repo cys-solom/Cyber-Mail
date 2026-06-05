@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      accountsStore.insert({
+      await accountsStore.insert({
         email: email.trim(),
         encrypted_password: encrypt(password),
         client_id: client_id.trim(),

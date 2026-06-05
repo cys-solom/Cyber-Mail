@@ -11,7 +11,7 @@ export async function GET(
   if (!isAdmin) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const data = accountsStore.findById(id);
+  const data = await accountsStore.findById(id);
   if (!data) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 });
 
   let password = '';
