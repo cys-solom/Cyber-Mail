@@ -7,7 +7,11 @@ import fs   from 'fs';
 import path from 'path';
 import type { StorageBackend } from '../local-store';
 
-const DATA_DIR  = path.join(process.cwd(), '.local-data');
+// على Vercel: /var/task غير قابل للكتابة — نستخدم /tmp
+// محلياً: نستخدم .local-data في مجلد المشروع
+const DATA_DIR = process.env.VERCEL
+  ? '/tmp/.cyber-mail-data'
+  : path.join(process.cwd(), '.local-data');
 const DATA_FILE = path.join(DATA_DIR, 'accounts.json');
 
 export class FileBackend implements StorageBackend {

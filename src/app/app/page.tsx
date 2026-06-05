@@ -58,6 +58,7 @@ export default function AppPage() {
   const [credentials,   setCredentials]     = useState<{email:string;password:string}|null>(null);
   const [showCreds,     setShowCreds]       = useState(false);
   const [loadingCreds,  setLoadingCreds]    = useState(false);
+  const [fetchError,    setFetchError]      = useState<string|null>(null);
 
   const currentAccount = currentIndex >= 0 ? accounts[currentIndex] : null;
 
@@ -159,14 +160,20 @@ export default function AppPage() {
   // ── Mail Fetch ──────────────────────────────────────
   const fetchMail = async () => {
     if (!currentAccount) return;
-    setFetching(true);
+    setFetching(true); setFetchError(null); setMessages([]); setOtpResults([]);
     try {
       const res  = await fetch('/api/mail/fetch', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ account_id: currentAccount.id, top: parseInt(mailCount) }) });
       const data = await res.json();
+      if (!res.ok || !data.success) {
+        setFetchError(data.error || `Error ${res.status}`);
+        return;
+      }
       if (data.data?.messages) setMessages(data.data.messages);
       if (data.data?.otps)     setOtpResults(data.data.otps);
       setUsedAccounts(prev => { const n = new Set([...prev, currentAccount.id]); return n; });
       markUsedOnServer(currentAccount.id, true);
+    } catch(e) {
+      setFetchError(String(e));
     } finally { setFetching(false); }
   };
 
@@ -174,17 +181,20 @@ export default function AppPage() {
     if (currentIndex >= accounts.length - 1) return;
     const nextIdx = currentIndex + 1; setCurrentIndex(nextIdx);
     localStorage.setItem('ds_currentIndex', String(nextIdx));
-    setMessages([]); setOtpResults([]); setCredentials(null); setShowCreds(false);
+    setMessages([]); setOtpResults([]); setCredentials(null); setShowCreds(false); setFetchError(null);
     const nextAcc = accounts[nextIdx];
     if (!nextAcc) return;
     setFetching(true);
     try {
       const res  = await fetch('/api/mail/fetch', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ account_id: nextAcc.id, top: parseInt(mailCount) }) });
       const data = await res.json();
+      if (!res.ok || !data.success) { setFetchError(data.error || `Error ${res.status}`); return; }
       if (data.data?.messages) setMessages(data.data.messages);
       if (data.data?.otps)     setOtpResults(data.data.otps);
       setUsedAccounts(prev => { const n = new Set([...prev, nextAcc.id]); return n; });
       markUsedOnServer(nextAcc.id, true);
+    } catch(e) {
+      setFetchError(String(e));
     } finally { setFetching(false); }
   };
 
@@ -546,6 +556,15 @@ export default function AppPage() {
             <div style={{ padding:'14px 20px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:10, background:'rgba(12,18,32,0.4)', flexShrink:0 }}>
               <Shield style={{ width:16, height:16, color: C.text3 }} />
               <span style={{ fontSize:13, color: C.text3 }}>Select an account from the left panel</span>
+            </div>
+          )}
+
+          {/* Error Banner */}
+          {fetchError && (
+            <div className="animate-in" style={{ padding:'10px 20px', borderBottom:`1px solid rgba(239,68,68,0.2)`, background:'rgba(239,68,68,0.06)', display:'flex', alignItems:'center', gap:10, flexShrink:0 }}>
+              <div style={{ width:6, height:6, borderRadius:'50%', background:'#ef4444', flexShrink:0 }} />
+              <span style={{ fontSize:12, color:'#fca5a5', flex:1, fontFamily:"'JetBrains Mono',monospace" }}>❌ {fetchError}</span>
+              <button onClick={() => setFetchError(null)} style={{ fontSize:11, color:'#94a3b8', background:'none', border:'none', cursor:'pointer' }}>✕</button>
             </div>
           )}
 
