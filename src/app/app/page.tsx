@@ -471,34 +471,39 @@ export default function AppPage() {
 
               {/* ── Email | Password block ── */}
               <div style={{ display:'flex', alignItems:'center', gap:0, flex:1, minWidth:0, background:'rgba(0,0,0,0.25)', borderRadius:10, border:`1px solid ${C.border}`, overflow:'hidden' }}>
-                {/* Email */}
-                <div style={{ flex:1, minWidth:0, padding:'7px 12px', borderRight:`1px solid ${C.border}` }}>
-                  <p style={{ fontSize:10, fontWeight:700, color: C.text3, letterSpacing:'0.07em', marginBottom:2 }}>EMAIL</p>
-                  <p style={{ fontSize:13, fontWeight:700, color:'#93c5fd', fontFamily:"'JetBrains Mono',monospace", overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{currentAccount.email}</p>
+                {/* Email + copy */}
+                <div style={{ flex:1, minWidth:0, padding:'7px 12px', borderRight:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:8 }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <p style={{ fontSize:10, fontWeight:700, color: C.text3, letterSpacing:'0.07em', marginBottom:2 }}>EMAIL</p>
+                    <p style={{ fontSize:13, fontWeight:700, color:'#93c5fd', fontFamily:"'JetBrains Mono',monospace", overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{currentAccount.email}</p>
+                  </div>
+                  <button onClick={() => { navigator.clipboard.writeText(currentAccount.email); setCopiedCode('email'); setTimeout(() => setCopiedCode(''), 2000); }}
+                    title="Copy email" style={{ width:28, height:28, borderRadius:7, border:`1px solid ${copiedCode==='email' ? 'rgba(16,185,129,0.4)' : C.border}`, background: copiedCode==='email' ? 'rgba(16,185,129,0.12)' : 'rgba(255,255,255,0.04)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, transition:'all 0.15s' }}>
+                    {copiedCode==='email' ? <Check style={{ width:12, height:12, color: C.green }} /> : <Copy style={{ width:12, height:12, color:'#60a5fa' }} />}
+                  </button>
                 </div>
-                {/* Password */}
-                <div style={{ flex:1, minWidth:0, padding:'7px 12px', borderRight:`1px solid ${C.border}` }}>
-                  <p style={{ fontSize:10, fontWeight:700, color: C.text3, letterSpacing:'0.07em', marginBottom:2 }}>PASSWORD</p>
-                  {credentials ? (
-                    <p style={{ fontSize:13, fontWeight:700, color:'#c4b5fd', fontFamily:"'JetBrains Mono',monospace", overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{credentials.password}</p>
-                  ) : (
-                    <p style={{ fontSize:13, color: C.text3, fontFamily:"'JetBrains Mono',monospace" }}>••••••••</p>
-                  )}
+                {/* Password + copy */}
+                <div style={{ flex:1, minWidth:0, padding:'7px 12px', display:'flex', alignItems:'center', gap:8 }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <p style={{ fontSize:10, fontWeight:700, color: C.text3, letterSpacing:'0.07em', marginBottom:2 }}>PASSWORD</p>
+                    {credentials ? (
+                      <p style={{ fontSize:13, fontWeight:700, color:'#c4b5fd', fontFamily:"'JetBrains Mono',monospace", overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{credentials.password}</p>
+                    ) : (
+                      <p style={{ fontSize:13, color: C.text3, fontFamily:"'JetBrains Mono',monospace" }}>••••••••</p>
+                    )}
+                  </div>
+                  <button onClick={async () => {
+                    let pass = credentials?.password;
+                    if (!pass) {
+                      const r = await fetch(`/api/accounts/${currentAccount.id}/credentials`);
+                      const d = await r.json();
+                      if (d.success) { setCredentials(d.data); pass = d.data.password; }
+                    }
+                    if (pass) { navigator.clipboard.writeText(pass); setCopiedCode('pass'); setTimeout(() => setCopiedCode(''), 2000); }
+                  }} title="Copy password" style={{ width:28, height:28, borderRadius:7, border:`1px solid ${copiedCode==='pass' ? 'rgba(16,185,129,0.4)' : C.border}`, background: copiedCode==='pass' ? 'rgba(16,185,129,0.12)' : 'rgba(255,255,255,0.04)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, transition:'all 0.15s' }}>
+                    {copiedCode==='pass' ? <Check style={{ width:12, height:12, color: C.green }} /> : <Copy style={{ width:12, height:12, color:'#c4b5fd' }} />}
+                  </button>
                 </div>
-                {/* Copy email|pass */}
-                <button onClick={async () => {
-                  let pass = credentials?.password;
-                  if (!pass) {
-                    const r = await fetch(`/api/accounts/${currentAccount.id}/credentials`);
-                    const d = await r.json();
-                    if (d.success) { setCredentials(d.data); pass = d.data.password; }
-                  }
-                  navigator.clipboard.writeText(`${currentAccount.email}|${pass || ''}`);
-                  setCopiedCode('combo'); setTimeout(() => setCopiedCode(''), 2000);
-                }} title="Copy email|password" style={{ padding:'0 14px', height:'100%', minHeight:52, border:'none', background: copiedCode==='combo' ? 'rgba(16,185,129,0.15)' : 'rgba(59,130,246,0.08)', cursor:'pointer', display:'flex', alignItems:'center', gap:6, flexShrink:0, transition:'all 0.15s' }}>
-                  {copiedCode==='combo' ? <Check style={{ width:14, height:14, color: C.green }} /> : <Copy style={{ width:14, height:14, color:'#60a5fa' }} />}
-                  <span style={{ fontSize:11, fontWeight:700, color: copiedCode==='combo' ? C.green : '#60a5fa', whiteSpace:'nowrap' }}>{copiedCode==='combo' ? 'Copied!' : 'Copy'}</span>
-                </button>
               </div>
 
               {/* Mail count */}
