@@ -47,9 +47,12 @@ export default function AppPage() {
   const [activatedAccounts, setActivatedAccounts] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('ds_activated') || '[]')); } catch { return new Set(); }
   });
+  const [plusTagged, setPlusTagged] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('ds_plus1') || '[]')); } catch { return new Set(); }
+  });
   const [showExport,    setShowExport]      = useState(false);
   const [exportCopied,  setExportCopied]    = useState(false);
-  const [exportData,    setExportData]      = useState<{email:string;password:string}[]>([]);
+  const [exportData,    setExportData]      = useState<{email:string;password:string;originalEmail?:string;isPlusTagged?:boolean}[]>([]);
   const [loadingExport, setLoadingExport]   = useState(false);
   const [openMessage,   setOpenMessage]     = useState<MailMessage|null>(null);
   const [credentials,   setCredentials]     = useState<{email:string;password:string}|null>(null);
@@ -287,7 +290,8 @@ export default function AppPage() {
     // 3. مسح الـ localStorage
     localStorage.removeItem('ds_currentIndex');
     localStorage.removeItem('ds_activated');
-    setActivatedAccounts(new Set());
+    localStorage.removeItem('ds_plus1');
+    setPlusTagged(new Set());
   };
 
   // ── Export ──────────────────────────────────────────
@@ -302,12 +306,26 @@ export default function AppPage() {
           try {
             const res  = await fetch(`/api/accounts/${acc.id}/credentials`);
             const data = await res.json();
-            return { email: acc.email, password: data.success ? data.data.password : '???' };
-          } catch { return { email: acc.email, password: '???' }; }
+            // إذا كان الأكونت معلم بـ +1 نضيف +1 قبل @ في التصدير فقط
+            const exportEmail = plusTagged.has(acc.id)
+              ? acc.email.replace('@', '+1@')
+              : acc.email;
+            return { email: exportEmail, password: data.success ? data.data.password : '???', originalEmail: acc.email, isPlusTagged: plusTagged.has(acc.id) };
+          } catch { return { email: acc.email, password: '???', originalEmail: acc.email, isPlusTagged: false }; }
         })
       );
       setExportData(results);
     } finally { setLoadingExport(false); }
+  };
+
+  const togglePlusTag = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setPlusTagged(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      localStorage.setItem('ds_plus1', JSON.stringify([...next]));
+      return next;
+    });
   };
 
   const exportText = exportData.map(d => `${d.email}|${d.password}`).join('\n');
@@ -409,9 +427,10 @@ export default function AppPage() {
                 const isSelected  = idx === currentIndex;
                 const isUsed      = usedAccounts.has(acc.id);
                 const isActivated = activatedAccounts.has(acc.id);
+                const isPlus      = plusTagged.has(acc.id);
                 return (
                   <div key={acc.id} onClick={() => selectAccount(idx)} style={{
-                    display:'flex', alignItems:'center', gap:8, padding:'9px 10px', borderRadius:10, cursor:'pointer', marginBottom:2, transition:'all 0.15s',
+                    display:'flex', alignItems:'center', gap:6, padding:'9px 10px', borderRadius:10, cursor:'pointer', marginBottom:2, transition:'all 0.15s',
                     background: isSelected ? 'rgba(59,130,246,0.1)' : isActivated ? 'rgba(16,185,129,0.05)' : 'transparent',
                     border: `1px solid ${isSelected ? 'rgba(59,130,246,0.2)' : isActivated ? 'rgba(16,185,129,0.12)' : 'transparent'}`,
                   }}>
@@ -419,6 +438,10 @@ export default function AppPage() {
                     <div style={{ width:7, height:7, borderRadius:'50%', flexShrink:0, background: isSelected ? C.blue : isActivated ? C.green : isUsed ? C.amber : C.text3, boxShadow: isSelected ? `0 0 8px ${C.blue}` : isActivated ? `0 0 8px ${C.green}` : 'none', transition:'all 0.2s' }} />
                     {/* Email */}
                     <span style={{ flex:1, fontSize:12, fontWeight: isSelected || isActivated ? 600 : 400, color: isSelected ? '#93c5fd' : isActivated ? '#6ee7b7' : C.text2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{acc.email}</span>
+                    {/* +1 tag toggle */}
+                    <button onClick={e => togglePlusTag(acc.id, e)} title={isPlus ? 'إلغاء +1' : 'تعليم بـ +1 في التصدير'} style={{ width:20, height:20, borderRadius:5, border:`1px solid ${isPlus ? 'rgba(251,146,60,0.4)' : C.border}`, background: isPlus ? 'rgba(251,146,60,0.15)' : 'rgba(255,255,255,0.03)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', flexShrink:0, transition:'all 0.15s' }}>
+                      <span style={{ fontSize:9, fontWeight:800, color: isPlus ? '#fb923c' : C.text3, lineHeight:1 }}>+1</span>
+                    </button>
                     {/* Activate toggle */}
                     <button onClick={e => toggleActivated(acc.id, e)} title={isActivated ? 'Click to deactivate' : 'Mark as activated'} style={{ width:20, height:20, borderRadius:5, border:`1px solid ${isActivated ? 'rgba(16,185,129,0.3)' : C.border}`, background: isActivated ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.03)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', flexShrink:0, transition:'all 0.15s' }}>
                       {isActivated ? <Check style={{ width:10, height:10, color: C.green }} /> : <Plus style={{ width:9, height:9, color: C.text3 }} />}
@@ -734,7 +757,10 @@ export default function AppPage() {
                   {exportData.map((item, i) => (
                     <div key={i} style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', borderBottom: i < exportData.length-1 ? `1px solid rgba(255,255,255,0.03)` : 'none' }}>
                       <div style={{ width:6, height:6, borderRadius:'50%', background: C.green, flexShrink:0 }} />
-                      <span style={{ fontSize:12, color:'#6ee7b7', fontFamily:"'JetBrains Mono', monospace", fontWeight:600, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.email}</span>
+                      <div style={{ flex:1, minWidth:0, display:'flex', alignItems:'center', gap:6 }}>
+                        <span style={{ fontSize:12, color:'#6ee7b7', fontFamily:"'JetBrains Mono', monospace", fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.email}</span>
+                        {item.isPlusTagged && <span style={{ fontSize:9, fontWeight:800, color:'#fb923c', background:'rgba(251,146,60,0.15)', border:'1px solid rgba(251,146,60,0.3)', borderRadius:4, padding:'1px 5px', flexShrink:0 }}>+1</span>}
+                      </div>
                       <span style={{ fontSize:12, color: C.text3, fontFamily:"'JetBrains Mono', monospace" }}>|</span>
                       <span style={{ fontSize:12, color: C.text2, fontFamily:"'JetBrains Mono', monospace", flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.password}</span>
                       <button onClick={() => navigator.clipboard.writeText(`${item.email}|${item.password}`)} style={{ width:26, height:26, borderRadius:6, border:`1px solid ${C.border}`, background:'rgba(255,255,255,0.03)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
