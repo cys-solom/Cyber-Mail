@@ -371,13 +371,7 @@ export default function AppPage() {
     setBrokenAccounts(prev => {
       const next = new Set(prev);
       if (next.has(id)) { next.delete(id); }
-      else {
-        next.add(id);
-        // احذف من الـ backup
-        const backup = JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
-        delete backup[email];
-        localStorage.setItem('ds_import_backup', JSON.stringify(backup));
-      }
+      else { next.add(id); }
       localStorage.setItem('ds_broken', JSON.stringify([...next]));
       return next;
     });

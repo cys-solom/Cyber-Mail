@@ -47,8 +47,26 @@ export default function BrokenPage() {
     setBrokenIds(ids);
     setSelected(new Set(ids)); // كل التالفة محددة بالديفولت
 
-    fetch('/api/accounts').then(r => r.json()).then(d => {
-      if (d.success) setAllAccounts(d.data || []);
+    fetch('/api/accounts').then(r => r.json()).then(async d => {
+      if (d.success) {
+        if (d.data && d.data.length === 0) {
+          // السيرفر فاضي (cold start) — استعادة من الـ backup تلقائياً
+          const backup = JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
+          const items = Object.values(backup);
+          if (items.length > 0) {
+            console.log('[auto-restore] restoring from broken page');
+            const res = await fetch('/api/accounts/import', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ accounts: items }) });
+            const json = await res.json();
+            if (json.success) {
+              const res2 = await fetch('/api/accounts');
+              const json2 = await res2.json();
+              if (json2.success) setAllAccounts(json2.data || []);
+            }
+          }
+        } else {
+          setAllAccounts(d.data || []);
+        }
+      }
     });
   }, []);
 
@@ -60,10 +78,6 @@ export default function BrokenPage() {
       const next = new Set(prev);
       next.delete(id);
       localStorage.setItem('ds_broken', JSON.stringify([...next]));
-      // أعد للـ backup
-      const backup = JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
-      const importData = JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
-      // نتركه بدون re-add لأنه تالف
       return next;
     });
     setSelected(prev => { const n = new Set(prev); n.delete(id); return n; });
@@ -116,12 +130,29 @@ export default function BrokenPage() {
     URL.revokeObjectURL(url);
   };
 
-  // مسح كل التالفة
-  const clearAllBroken = () => {
+  // مسح كل التالفة نهائياً
+  const clearAllBroken = async () => {
     if (!confirm('مسح كل الأكونتات التالفة نهائياً؟')) return;
+    
+    const toDelete = [...brokenAccounts];
+    try {
+      await Promise.all(
+        toDelete.map(acc => fetch(`/api/accounts/${acc.id}`, { method: 'DELETE' }))
+      );
+    } catch (e) {
+      console.error('Error deleting broken accounts:', e);
+    }
+
+    const backup = JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
+    toDelete.forEach(acc => {
+      delete backup[acc.email];
+    });
+    localStorage.setItem('ds_import_backup', JSON.stringify(backup));
+
     localStorage.setItem('ds_broken', '[]');
     setBrokenIds(new Set());
     setExportData([]);
+    setAllAccounts(prev => prev.filter(a => !toDelete.some(td => td.id === a.id)));
   };
 
   return (

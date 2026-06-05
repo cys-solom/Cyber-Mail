@@ -12,7 +12,7 @@ export async function GET(
   if (!isAdmin) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const data = accountsStore.findById(id);
+  const data = await accountsStore.findById(id);
   if (!data) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 });
   return NextResponse.json({ success: true, data });
 }
@@ -37,7 +37,7 @@ export async function PATCH(
   if (body.refresh_token)       patch.encrypted_refresh_token = encrypt(body.refresh_token);
   if (body.client_id)           patch.client_id = body.client_id;
 
-  const data = accountsStore.update(id, patch);
+  const data = await accountsStore.update(id, patch);
   if (!data) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 });
   return NextResponse.json({ success: true, data });
 }
@@ -51,7 +51,7 @@ export async function DELETE(
   if (!isAdmin) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const ok = accountsStore.delete(id);
+  const ok = await accountsStore.delete(id);
   if (!ok) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 });
   return NextResponse.json({ success: true });
 }

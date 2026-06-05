@@ -21,6 +21,9 @@ type AccountRecord = EmailAccount & {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function uuid(): string  { return crypto.randomUUID(); }
+function getStableId(email: string): string {
+  return crypto.createHash('sha256').update(email.trim().toLowerCase()).digest('hex');
+}
 function now():  string  { return new Date().toISOString(); }
 
 // ─── Storage Backend (lazy loaded) ──────────────────────────────────────────
@@ -119,7 +122,7 @@ export const accountsStore = {
       return existing;
     }
     const record: AccountRecord = {
-      id:                       uuid(),
+      id:                       getStableId(data.email),
       email:                    data.email.trim(),
       encrypted_password:       data.encrypted_password,
       client_id:                data.client_id.trim(),
