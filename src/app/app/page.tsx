@@ -53,8 +53,12 @@ export default function AppPage() {
   const [authCodes, setAuthCodes] = useState<Record<string,string>>(() => {
     try { return JSON.parse(localStorage.getItem('ds_auth_codes') || '{}'); } catch { return {}; }
   });
-  const [showAuthInput, setShowAuthInput] = useState<string|null>(null); // account id
+  const [showAuthInput, setShowAuthInput] = useState<string|null>(null);
   const [authInputVal,  setAuthInputVal]  = useState('');
+  const [brokenAccounts, setBrokenAccounts] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('ds_broken') || '[]')); } catch { return new Set(); }
+  });
+  const [showBroken, setShowBroken] = useState(false);
   const [showExport,    setShowExport]      = useState(false);
   const [exportCopied,  setExportCopied]    = useState(false);
   const [exportData,    setExportData]      = useState<{email:string;password:string;authCode?:string;originalEmail?:string;isPlusTagged?:boolean}[]>([]);
@@ -69,9 +73,24 @@ export default function AppPage() {
 
   // ── Auth ────────────────────────────────────────────
   useEffect(() => {
-    fetch('/api/auth/login').then(r => r.json()).then(d => {
-      if (d.success) { setAuthenticated(true); setAuthChecked(true); fetchAccounts(); }
-      else { setAuthChecked(true); router.push('/login'); }
+    fetch('/api/auth/login').then(r => r.json()).then(async d => {
+      if (d.success) {
+        setAuthenticated(true); setAuthChecked(true);
+        // جلب الأكونتات من السيرفر
+        const res  = await fetch('/api/accounts');
+        const json = await res.json();
+        if (json.success && json.data && json.data.length === 0) {
+          // السيرفر فاضل (cold start) — استعادة من الـ backup تلقائياً
+          const backup: Record<string,{email:string;password:string;client_id:string;refresh_token:string}> =
+            JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
+          const items = Object.values(backup);
+          if (items.length > 0) {
+            console.log('[auto-restore] restoring', items.length, 'accounts from localStorage backup');
+            await fetch('/api/accounts/import', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ accounts: items }) });
+          }
+        }
+        fetchAccounts();
+      } else { setAuthChecked(true); router.push('/login'); }
     }).catch(() => { setAuthChecked(true); router.push('/login'); });
   }, []);
 
@@ -285,6 +304,12 @@ export default function AppPage() {
       const importRes  = await fetch('/api/accounts/import', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ accounts: items }) });
       const importData = await importRes.json();
       console.log('[import result]', importData);
+
+      // ✅ حفظ backup في localStorage عشان ما تضيعش عند الـ refresh
+      const existing: Record<string,typeof items[0]> = JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
+      for (const item of items) existing[item.email] = item;
+      localStorage.setItem('ds_import_backup', JSON.stringify(existing));
+
       setShowImport(false); setImportText('');
       await new Promise(r => setTimeout(r, 150));
       await fetchAccounts();
@@ -292,24 +317,18 @@ export default function AppPage() {
   };
 
   const clearAll = async () => {
-    // 1. مسح كل الأكونتات من الـ storage فعلياً
+    if (!confirm('هل أنت متأكد؟ سيتم مسح كل الأكونتات والـ backup')) return;
     try { await fetch('/api/accounts/clear', { method: 'DELETE' }); } catch {}
-    // 2. مسح الـ UI state
-    setAccounts([]);
-    setCurrentIndex(-1);
-    setMessages([]);
-    setOtpResults([]);
-    setUsedAccounts(new Set());
-    setCredentials(null);
-    setShowCreds(false);
-    // 3. مسح الـ localStorage
+    setAccounts([]); setCurrentIndex(-1); setMessages([]); setOtpResults([]);
+    setUsedAccounts(new Set()); setCredentials(null); setShowCreds(false);
     localStorage.removeItem('ds_currentIndex');
     localStorage.removeItem('ds_activated');
     localStorage.removeItem('ds_plus1');
     localStorage.removeItem('ds_auth_codes');
-    setPlusTagged(new Set());
-    setAuthCodes({});
-    setShowAuthInput(null);
+    localStorage.removeItem('ds_broken');
+    localStorage.removeItem('ds_import_backup'); // ✅ مسح الـ backup فقط عند Clear
+    setPlusTagged(new Set()); setAuthCodes({}); setShowAuthInput(null);
+    setBrokenAccounts(new Set());
   };
 
   // ── Export ──────────────────────────────────────────
@@ -343,6 +362,23 @@ export default function AppPage() {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       localStorage.setItem('ds_plus1', JSON.stringify([...next]));
+      return next;
+    });
+  };
+
+  const toggleBroken = (id: string, email: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setBrokenAccounts(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) { next.delete(id); }
+      else {
+        next.add(id);
+        // احذف من الـ backup
+        const backup = JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
+        delete backup[email];
+        localStorage.setItem('ds_import_backup', JSON.stringify(backup));
+      }
+      localStorage.setItem('ds_broken', JSON.stringify([...next]));
       return next;
     });
   };
@@ -447,7 +483,7 @@ export default function AppPage() {
                 <Users style={{ width:14, height:14, color: C.text3 }} />
                 <span style={{ fontSize:12, fontWeight:700, color: C.text2, letterSpacing:'0.05em', textTransform:'uppercase' }}>Mailboxes</span>
               </div>
-              <span style={{ padding:'2px 8px', borderRadius:100, fontSize:11, fontWeight:700, color: C.blue, background:'rgba(59,130,246,0.1)', border:'1px solid rgba(59,130,246,0.15)' }}>{accounts.length}</span>
+              <span style={{ padding:'2px 8px', borderRadius:100, fontSize:11, fontWeight:700, color: C.blue, background:'rgba(59,130,246,0.1)', border:'1px solid rgba(59,130,246,0.15)' }}>{accounts.filter(a => !brokenAccounts.has(a.id)).length}</span>
             </div>
             <button onClick={() => setShowImport(true)} style={{ width:'100%', padding:'10px 0', borderRadius:10, border:'none', background:'linear-gradient(135deg, #3b82f6, #6366f1)', color:'white', fontSize:13, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:6, boxShadow:'0 4px 16px rgba(59,130,246,0.25)', transition:'all 0.2s' }}>
               <Plus style={{ width:15, height:15 }} /> Import Accounts
@@ -456,27 +492,33 @@ export default function AppPage() {
 
           {/* Account List */}
           <div style={{ flex:1, overflowY:'auto', padding:'6px 8px' }}>
-            {accounts.length === 0 ? (
+            {accounts.filter(a => !brokenAccounts.has(a.id)).length === 0 ? (
               <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', minHeight:200, gap:10 }}>
                 <Mail style={{ width:36, height:36, color:'#1e293b' }} />
                 <p style={{ fontSize:13, color: C.text3 }}>No mailboxes yet</p>
                 <p style={{ fontSize:11, color:'#334155' }}>Click Import above</p>
               </div>
             ) : (
-              accounts.map((acc, idx) => {
-                const isSelected  = idx === currentIndex;
+              accounts.filter(a => !brokenAccounts.has(a.id)).map(acc => {
+                const realIdx = accounts.indexOf(acc);
+                const isSelected  = realIdx === currentIndex;
                 const isUsed      = usedAccounts.has(acc.id);
                 const isActivated = activatedAccounts.has(acc.id);
                 const isPlus      = plusTagged.has(acc.id);
                 const hasAuth     = !!authCodes[acc.id];
                 return (
                   <div key={acc.id} style={{ marginBottom:2 }}>
-                    <div onClick={() => selectAccount(idx)} style={{
+                    <div onClick={() => selectAccount(realIdx)} style={{
                       display:'flex', alignItems:'center', gap:6, padding:'9px 10px', borderRadius:showAuthInput===acc.id ? '10px 10px 0 0' : 10, cursor:'pointer', transition:'all 0.15s',
                       background: isSelected ? 'rgba(59,130,246,0.1)' : isActivated ? 'rgba(16,185,129,0.05)' : 'transparent',
                       border: `1px solid ${isSelected ? 'rgba(59,130,246,0.2)' : isActivated ? 'rgba(16,185,129,0.12)' : showAuthInput===acc.id ? 'rgba(168,85,247,0.25)' : 'transparent'}`,
                       borderBottom: showAuthInput===acc.id ? 'none' : undefined,
                     }}>
+                      {/* زر تالف — على أقصى اليسار */}
+                      <button onClick={e => toggleBroken(acc.id, acc.email, e)} title="تحديد كتالف/معطوب" style={{ width:16, height:16, borderRadius:4, border:'1px solid rgba(239,68,68,0.15)', background:'transparent', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', flexShrink:0, transition:'all 0.15s', opacity:0.5 }}
+                        onMouseEnter={e => (e.currentTarget.style.opacity='1')} onMouseLeave={e => (e.currentTarget.style.opacity='0.5')}>
+                        <span style={{ fontSize:8, color:'#f87171' }}>✕</span>
+                      </button>
                       {/* Status dot */}
                       <div style={{ width:7, height:7, borderRadius:'50%', flexShrink:0, background: isSelected ? C.blue : isActivated ? C.green : isUsed ? C.amber : C.text3, boxShadow: isSelected ? `0 0 8px ${C.blue}` : isActivated ? `0 0 8px ${C.green}` : 'none', transition:'all 0.2s' }} />
                       {/* Email */}
@@ -493,22 +535,16 @@ export default function AppPage() {
                       <button onClick={e => toggleActivated(acc.id, e)} title={isActivated ? 'Click to deactivate' : 'Mark as activated'} style={{ width:20, height:20, borderRadius:5, border:`1px solid ${isActivated ? 'rgba(16,185,129,0.3)' : C.border}`, background: isActivated ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.03)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', flexShrink:0, transition:'all 0.15s' }}>
                         {isActivated ? <Check style={{ width:10, height:10, color: C.green }} /> : <Plus style={{ width:9, height:9, color: C.text3 }} />}
                       </button>
-                      {/* Used badge */}
                       {isUsed && (
                         <button onClick={e => toggleUsed(acc.id, e)} style={{ padding:'1px 5px', borderRadius:4, fontSize:9, fontWeight:700, background:'rgba(245,158,11,0.1)', border:'1px solid rgba(245,158,11,0.15)', color: C.amber, cursor:'pointer', flexShrink:0 }}>USED</button>
                       )}
                     </div>
-                    {/* Auth input panel */}
                     {showAuthInput === acc.id && (
                       <div onClick={e => e.stopPropagation()} style={{ padding:'8px 10px', background:'rgba(168,85,247,0.05)', border:'1px solid rgba(168,85,247,0.25)', borderTop:'none', borderRadius:'0 0 10px 10px', display:'flex', gap:6 }}>
-                        <input
-                          autoFocus
-                          value={authInputVal}
-                          onChange={e => setAuthInputVal(e.target.value)}
+                        <input autoFocus value={authInputVal} onChange={e => setAuthInputVal(e.target.value)}
                           onKeyDown={e => { if(e.key==='Enter') saveAuthCode(acc.id); if(e.key==='Escape') setShowAuthInput(null); }}
                           placeholder="اكتب Auth Code..."
-                          style={{ flex:1, padding:'5px 9px', borderRadius:7, border:'1px solid rgba(168,85,247,0.3)', background:'rgba(0,0,0,0.3)', color:'#e2e8f0', fontSize:12, fontFamily:"'JetBrains Mono',monospace", outline:'none' }}
-                        />
+                          style={{ flex:1, padding:'5px 9px', borderRadius:7, border:'1px solid rgba(168,85,247,0.3)', background:'rgba(0,0,0,0.3)', color:'#e2e8f0', fontSize:12, fontFamily:"'JetBrains Mono',monospace", outline:'none' }} />
                         <button onClick={() => saveAuthCode(acc.id)} style={{ padding:'5px 10px', borderRadius:7, border:'none', background:'rgba(168,85,247,0.2)', color:'#c084fc', fontSize:11, fontWeight:700, cursor:'pointer' }}>حفظ</button>
                         {authCodes[acc.id] && <button onClick={() => { setAuthInputVal(''); saveAuthCode(acc.id); }} style={{ padding:'5px 8px', borderRadius:7, border:'none', background:'rgba(239,68,68,0.1)', color:'#fca5a5', fontSize:11, cursor:'pointer' }}>✕</button>}
                       </div>
@@ -519,15 +555,34 @@ export default function AppPage() {
             )}
           </div>
 
+
           {/* Sidebar Footer */}
           <div style={{ padding:'10px 12px', borderTop:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
             <button onClick={clearAll} style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 10px', borderRadius:7, border:`1px solid ${C.border}`, background:'transparent', color: C.text3, fontSize:11, fontWeight:600, cursor:'pointer' }}>
               <Trash2 style={{ width:11, height:11 }} /> Clear
             </button>
-            <div style={{ fontSize:11, color: C.text3 }}>
-              {activatedAccounts.size > 0 && <span style={{ color: C.green, fontWeight:600 }}>✓ {activatedAccounts.size} activated</span>}
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              {brokenAccounts.size > 0 && (
+                <button onClick={() => setShowBroken(p => !p)} style={{ display:'flex', alignItems:'center', gap:4, padding:'3px 8px', borderRadius:6, border:`1px solid ${showBroken ? 'rgba(239,68,68,0.4)' : 'rgba(239,68,68,0.15)'}`, background: showBroken ? 'rgba(239,68,68,0.12)' : 'transparent', color:'#f87171', fontSize:10, fontWeight:700, cursor:'pointer' }}>
+                  ⚠️ تالف ({brokenAccounts.size})
+                </button>
+              )}
+              {activatedAccounts.size > 0 && <span style={{ color: C.green, fontWeight:600, fontSize:11 }}>✓ {activatedAccounts.size}</span>}
             </div>
           </div>
+
+          {/* Broken Accounts Section */}
+          {showBroken && brokenAccounts.size > 0 && (
+            <div style={{ borderTop:`1px solid rgba(239,68,68,0.2)`, background:'rgba(239,68,68,0.03)', padding:'8px', maxHeight:200, overflowY:'auto' }}>
+              <p style={{ fontSize:10, fontWeight:700, color:'#f87171', letterSpacing:'0.06em', marginBottom:6, paddingLeft:4 }}>⚠️ الأكونتات التالفة</p>
+              {accounts.filter(a => brokenAccounts.has(a.id)).map(acc => (
+                <div key={acc.id} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 8px', borderRadius:8, marginBottom:2, background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.1)' }}>
+                  <span style={{ fontSize:11, color:'#fca5a5', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{acc.email}</span>
+                  <button onClick={e => toggleBroken(acc.id, acc.email, e)} title="استعادة الأكونت" style={{ padding:'2px 7px', borderRadius:5, border:'1px solid rgba(16,185,129,0.3)', background:'rgba(16,185,129,0.08)', color: C.green, fontSize:10, fontWeight:700, cursor:'pointer' }}>↩ استعادة</button>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* ── Navigation ── */}
           <div style={{ padding:'12px 16px', borderTop:`1px solid ${C.border}`, background:'rgba(0,0,0,0.2)' }}>
