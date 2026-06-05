@@ -72,6 +72,15 @@ export default function AppPage() {
 
   const currentAccount = currentIndex >= 0 ? accounts[currentIndex] : null;
 
+  const visibleAccounts = accounts.filter(a => !brokenAccounts.has(a.id));
+  const filteredAccounts = visibleAccounts.filter(a => !accountSearchQuery || a.email.toLowerCase().includes(accountSearchQuery.toLowerCase()));
+  const displayedAccounts = [...filteredAccounts].sort((a, b) => {
+    const aAct = activatedAccounts.has(a.id) ? 1 : 0;
+    const bAct = activatedAccounts.has(b.id) ? 1 : 0;
+    return bAct - aAct; // Activated accounts float to top
+  });
+  const currentAccDispIdx = currentAccount ? displayedAccounts.findIndex(a => a.id === currentAccount.id) : -1;
+
   // ── Auth ────────────────────────────────────────────
   useEffect(() => {
     fetch('/api/auth/login').then(r => r.json()).then(async d => {
@@ -111,6 +120,36 @@ export default function AppPage() {
         const visible = json.data.filter((a: EmailAccount) => a.status !== 'deleted');
         console.log('[fetchAccounts] visible:', visible.length);
         setAccounts(visible);
+
+        // Clean up invalid/old IDs from localStorage and states
+        const validIds = new Set(visible.map((a: EmailAccount) => a.id));
+        setActivatedAccounts(prev => {
+          const next = new Set([...prev].filter(id => validIds.has(id)));
+          try { localStorage.setItem('ds_activated', JSON.stringify([...next])); } catch {}
+          return next;
+        });
+        setPlusTagged(prev => {
+          const next = new Set([...prev].filter(id => validIds.has(id)));
+          try { localStorage.setItem('ds_plus1', JSON.stringify([...next])); } catch {}
+          return next;
+        });
+        setBrokenAccounts(prev => {
+          const next = new Set([...prev].filter(id => validIds.has(id)));
+          try { localStorage.setItem('ds_broken', JSON.stringify([...next])); } catch {}
+          return next;
+        });
+        setAuthCodes(prev => {
+          const next = { ...prev };
+          let changed = false;
+          Object.keys(next).forEach(id => {
+            if (!validIds.has(id)) { delete next[id]; changed = true; }
+          });
+          if (changed) {
+            try { localStorage.setItem('ds_auth_codes', JSON.stringify(next)); } catch {}
+          }
+          return next;
+        });
+
         setCurrentIndex(prev => {
           const savedIdx = parseInt(localStorage.getItem('ds_currentIndex') || '-1');
           if (visible.length === 0) return -1;
@@ -131,20 +170,33 @@ export default function AppPage() {
   };
 
   const goNext = useCallback(() => {
-    if (currentIndex < accounts.length - 1) {
-      const next = currentIndex + 1; setCurrentIndex(next);
-      localStorage.setItem('ds_currentIndex', String(next));
+    const currentAcc = currentIndex >= 0 ? accounts[currentIndex] : null;
+    if (!currentAcc) {
+      if (displayedAccounts.length > 0) selectAccount(accounts.indexOf(displayedAccounts[0]));
+      return;
+    }
+    const dispIdx = displayedAccounts.findIndex(a => a.id === currentAcc.id);
+    if (dispIdx >= 0 && dispIdx < displayedAccounts.length - 1) {
+      const nextAcc = displayedAccounts[dispIdx + 1];
+      const nextRealIdx = accounts.indexOf(nextAcc);
+      setCurrentIndex(nextRealIdx);
+      localStorage.setItem('ds_currentIndex', String(nextRealIdx));
       setMessages([]); setOtpResults([]);
     }
-  }, [currentIndex, accounts.length]);
+  }, [currentIndex, accounts, displayedAccounts]);
 
   const goPrev = useCallback(() => {
-    if (currentIndex > 0) {
-      const prev = currentIndex - 1; setCurrentIndex(prev);
-      localStorage.setItem('ds_currentIndex', String(prev));
+    const currentAcc = currentIndex >= 0 ? accounts[currentIndex] : null;
+    if (!currentAcc) return;
+    const dispIdx = displayedAccounts.findIndex(a => a.id === currentAcc.id);
+    if (dispIdx > 0) {
+      const prevAcc = displayedAccounts[dispIdx - 1];
+      const prevRealIdx = accounts.indexOf(prevAcc);
+      setCurrentIndex(prevRealIdx);
+      localStorage.setItem('ds_currentIndex', String(prevRealIdx));
       setMessages([]); setOtpResults([]);
     }
-  }, [currentIndex]);
+  }, [currentIndex, accounts, displayedAccounts]);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -203,24 +255,29 @@ export default function AppPage() {
   };
 
   const fetchAndNext = async () => {
-    if (currentIndex >= accounts.length - 1) return;
-    const nextIdx = currentIndex + 1; setCurrentIndex(nextIdx);
-    localStorage.setItem('ds_currentIndex', String(nextIdx));
-    setMessages([]); setOtpResults([]); setCredentials(null); setShowCreds(false); setFetchError(null);
-    const nextAcc = accounts[nextIdx];
-    if (!nextAcc) return;
-    setFetching(true);
-    try {
-      const res  = await fetch('/api/mail/fetch', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ account_id: nextAcc.id, top: parseInt(mailCount) }) });
-      const data = await res.json();
-      if (!res.ok || !data.success) { setFetchError(data.error || `Error ${res.status}`); return; }
-      if (data.data?.messages) setMessages(data.data.messages);
-      if (data.data?.otps)     setOtpResults(data.data.otps);
-      setUsedAccounts(prev => { const n = new Set([...prev, nextAcc.id]); return n; });
-      markUsedOnServer(nextAcc.id, true);
-    } catch(e) {
-      setFetchError(String(e));
-    } finally { setFetching(false); }
+    const currentAcc = currentIndex >= 0 ? accounts[currentIndex] : null;
+    if (!currentAcc) return;
+    const dispIdx = displayedAccounts.findIndex(a => a.id === currentAcc.id);
+    if (dispIdx >= 0 && dispIdx < displayedAccounts.length - 1) {
+      const nextAcc = displayedAccounts[dispIdx + 1];
+      const nextRealIdx = accounts.indexOf(nextAcc);
+      setCurrentIndex(nextRealIdx);
+      localStorage.setItem('ds_currentIndex', String(nextRealIdx));
+      setMessages([]); setOtpResults([]); setCredentials(null); setShowCreds(false); setFetchError(null);
+      if (!nextAcc) return;
+      setFetching(true);
+      try {
+        const res  = await fetch('/api/mail/fetch', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ account_id: nextAcc.id, top: parseInt(mailCount) }) });
+        const data = await res.json();
+        if (!res.ok || !data.success) { setFetchError(data.error || `Error ${res.status}`); return; }
+        if (data.data?.messages) setMessages(data.data.messages);
+        if (data.data?.otps)     setOtpResults(data.data.otps);
+        setUsedAccounts(prev => { const n = new Set([...prev, nextAcc.id]); return n; });
+        markUsedOnServer(nextAcc.id, true);
+      } catch(e) {
+        setFetchError(String(e));
+      } finally { setFetching(false); }
+    }
   };
 
   const fetchCredentials = async () => {
@@ -528,22 +585,19 @@ export default function AppPage() {
 
           {/* Account List */}
           <div style={{ flex:1, overflowY:'auto', padding:'6px 8px' }}>
-            {accounts.filter(a => !brokenAccounts.has(a.id)).length === 0 ? (
+            {visibleAccounts.length === 0 ? (
               <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', minHeight:200, gap:10 }}>
                 <Mail style={{ width:36, height:36, color:'#1e293b' }} />
                 <p style={{ fontSize:13, color: C.text3 }}>No mailboxes yet</p>
                 <p style={{ fontSize:11, color:'#334155' }}>Click Import above</p>
               </div>
-            ) : accounts.filter(a => !brokenAccounts.has(a.id)).filter(a => !accountSearchQuery || a.email.toLowerCase().includes(accountSearchQuery.toLowerCase())).length === 0 ? (
+            ) : displayedAccounts.length === 0 ? (
               <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding: '20px 10px', gap:10 }}>
                 <Search style={{ width:24, height:24, color: C.text3 }} />
                 <p style={{ fontSize:12, color: C.text3, textAlign: 'center' }}>لا توجد حسابات تطابق البحث</p>
               </div>
             ) : (
-              accounts
-                .filter(a => !brokenAccounts.has(a.id))
-                .filter(a => !accountSearchQuery || a.email.toLowerCase().includes(accountSearchQuery.toLowerCase()))
-                .map(acc => {
+              displayedAccounts.map(acc => {
                 const realIdx = accounts.indexOf(acc);
                 const isSelected  = realIdx === currentIndex;
                 const isUsed      = usedAccounts.has(acc.id);
@@ -618,16 +672,16 @@ export default function AppPage() {
           {/* ── Navigation ── */}
           <div style={{ padding:'12px 16px', borderTop:`1px solid ${C.border}`, background:'rgba(0,0,0,0.2)' }}>
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <button onClick={goPrev} disabled={currentIndex <= 0} style={{ width:40, height:40, borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', border:`1px solid ${currentIndex > 0 ? 'rgba(59,130,246,0.2)' : C.border}`, background: currentIndex > 0 ? 'rgba(59,130,246,0.08)' : 'rgba(255,255,255,0.02)', color: currentIndex > 0 ? C.blue : C.text3, cursor: currentIndex > 0 ? 'pointer' : 'not-allowed', transition:'all 0.15s', flexShrink:0 }}>
+              <button onClick={goPrev} disabled={currentAccDispIdx <= 0} style={{ width:40, height:40, borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', border:`1px solid ${currentAccDispIdx > 0 ? 'rgba(59,130,246,0.2)' : C.border}`, background: currentAccDispIdx > 0 ? 'rgba(59,130,246,0.08)' : 'rgba(255,255,255,0.02)', color: currentAccDispIdx > 0 ? C.blue : C.text3, cursor: currentAccDispIdx > 0 ? 'pointer' : 'not-allowed', transition:'all 0.15s', flexShrink:0 }}>
                 <ChevronLeft style={{ width:18, height:18 }} />
               </button>
               <div style={{ flex:1, textAlign:'center' }}>
                 <div style={{ fontSize:20, fontWeight:900, color: C.text1 }}>
-                  {currentIndex >= 0 ? currentIndex + 1 : '—'}
-                  <span style={{ fontSize:12, color: C.text3, fontWeight:500 }}> / {accounts.length}</span>
+                  {currentAccDispIdx >= 0 ? currentAccDispIdx + 1 : '—'}
+                  <span style={{ fontSize:12, color: C.text3, fontWeight:500 }}> / {displayedAccounts.length}</span>
                 </div>
               </div>
-              <button onClick={goNext} disabled={currentIndex >= accounts.length - 1} style={{ width:40, height:40, borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', border:`1px solid ${currentIndex < accounts.length - 1 ? 'rgba(59,130,246,0.2)' : C.border}`, background: currentIndex < accounts.length - 1 ? 'rgba(59,130,246,0.08)' : 'rgba(255,255,255,0.02)', color: currentIndex < accounts.length - 1 ? C.blue : C.text3, cursor: currentIndex < accounts.length - 1 ? 'pointer' : 'not-allowed', transition:'all 0.15s', flexShrink:0 }}>
+              <button onClick={goNext} disabled={currentAccDispIdx === -1 || currentAccDispIdx >= displayedAccounts.length - 1} style={{ width:40, height:40, borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', border:`1px solid ${currentAccDispIdx !== -1 && currentAccDispIdx < displayedAccounts.length - 1 ? 'rgba(59,130,246,0.2)' : C.border}`, background: currentAccDispIdx !== -1 && currentAccDispIdx < displayedAccounts.length - 1 ? 'rgba(59,130,246,0.08)' : 'rgba(255,255,255,0.02)', color: currentAccDispIdx !== -1 && currentAccDispIdx < displayedAccounts.length - 1 ? C.blue : C.text3, cursor: currentAccDispIdx !== -1 && currentAccDispIdx < displayedAccounts.length - 1 ? 'pointer' : 'not-allowed', transition:'all 0.15s', flexShrink:0 }}>
                 <ChevronRight style={{ width:18, height:18 }} />
               </button>
             </div>

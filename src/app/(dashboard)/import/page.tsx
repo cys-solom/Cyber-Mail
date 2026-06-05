@@ -59,6 +59,22 @@ export default function ImportPage() {
         body: JSON.stringify({ accounts: validItems }),
       });
       const data = await res.json();
+      if (data.success) {
+        try {
+          const backup = JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
+          validItems.forEach(item => {
+            backup[item.email] = {
+              email: item.email,
+              password: item.password,
+              client_id: item.client_id,
+              refresh_token: item.refresh_token
+            };
+          });
+          localStorage.setItem('ds_import_backup', JSON.stringify(backup));
+        } catch (e) {
+          console.error('Failed to update ds_import_backup:', e);
+        }
+      }
       setResult({ success: data.data?.success ?? 0, failed: data.data?.failed ?? 0 });
       setStep('result');
     } finally {
