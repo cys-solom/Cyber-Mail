@@ -76,15 +76,17 @@ export default function AppPage() {
     try {
       const res  = await fetch('/api/accounts');
       const json = await res.json();
+      console.log('[fetchAccounts] raw:', json.count, 'accounts');
       if (json.success && json.data) {
-        const active = json.data.filter((a: EmailAccount) => a.status === 'active');
-        setAccounts(active);
-        // Use functional updater to avoid stale closure on currentIndex
+        // Show all accounts (not just 'active') — filter out only explicitly failed
+        const visible = json.data.filter((a: EmailAccount) => a.status !== 'deleted');
+        console.log('[fetchAccounts] visible:', visible.length);
+        setAccounts(visible);
         setCurrentIndex(prev => {
           const savedIdx = parseInt(localStorage.getItem('ds_currentIndex') || '-1');
-          if (active.length === 0) return -1;
-          if (savedIdx >= 0 && savedIdx < active.length) return savedIdx;
-          if (prev === -1 || prev >= active.length) return 0;
+          if (visible.length === 0) return -1;
+          if (savedIdx >= 0 && savedIdx < visible.length) return savedIdx;
+          if (prev === -1 || prev >= visible.length) return 0;
           return prev;
         });
         const usedIds = json.data.filter((a: any) => a.is_used).map((a: any) => a.id);
@@ -212,34 +214,56 @@ export default function AppPage() {
   };
 
   // ── Import ──────────────────────────────────────────
+  /** يستخرج الأكونتات من أي نص — يتجاهل الإيموجي والترقيم والخطوط */
+  const parseLine = (raw: string): { email: string; password: string; client_id: string; refresh_token: string } | null => {
+    // 1. أزل الترقيم في البداية مثل "1. " أو "20. "
+    let line = raw.trim().replace(/^\d+\.\s*/, '');
+    // 2. تأكد إن الخط فيه @ (علامة إيميل)
+    if (!line.includes('@')) return null;
+
+    let email = '', password = '', thirdField = '', fourthField = '';
+
+    if (line.includes('----')) {
+      const parts = line.split('----');
+      email = parts[0]?.trim() || ''; password = parts[1]?.trim() || '';
+      thirdField = parts[2]?.trim() || ''; fourthField = parts[3]?.trim() || '';
+    } else {
+      // انقسم على أول 3 pipes بس (الـ token ممكن يحتوي على أي حاجة)
+      const p1 = line.indexOf('|');
+      const p2 = line.indexOf('|', p1 + 1);
+      const p3 = line.indexOf('|', p2 + 1);
+      if (p1 === -1 || p2 === -1 || p3 === -1) return null;
+      email = line.slice(0, p1).trim();
+      password = line.slice(p1 + 1, p2).trim();
+      thirdField = line.slice(p2 + 1, p3).trim();
+      fourthField = line.slice(p3 + 1).trim();
+    }
+
+    const uuidRx = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let client_id: string, refresh_token: string;
+    if (uuidRx.test(fourthField))     { refresh_token = thirdField;  client_id = fourthField; }
+    else if (uuidRx.test(thirdField)) { client_id = thirdField;      refresh_token = fourthField; }
+    else                              { refresh_token = thirdField;   client_id = fourthField; }
+
+    if (!(email && password && client_id && refresh_token)) return null;
+    return { email, password, client_id, refresh_token };
+  };
+
   const handleImport = async () => {
     if (!importText.trim()) return;
     setImporting(true);
     try {
-      const lines = importText.trim().split('\n').filter(Boolean);
-      const items = lines.map(line => {
-        const sep   = line.includes('----') ? '----' : '|';
-        const parts = line.split(sep);
-        if (parts.length < 4) return null;
-        const email = parts[0]?.trim() || '';
-        const password = parts[1]?.trim() || '';
-        const thirdField  = parts[2]?.trim() || '';
-        const fourthField = parts[3]?.trim() || '';
-        const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        let client_id: string, refresh_token: string;
-        if (uuid.test(fourthField)) { refresh_token = thirdField; client_id = fourthField; }
-        else if (uuid.test(thirdField)) { client_id = thirdField; refresh_token = fourthField; }
-        else { refresh_token = thirdField; client_id = fourthField; }
-        return { email, password, client_id, refresh_token, valid: !!(email && password && client_id && refresh_token) };
-      }).filter(i => i && i.valid) as any[];
+      const lines = importText.trim().split('\n');
+      const items = lines.map(l => parseLine(l)).filter(Boolean) as { email:string; password:string; client_id:string; refresh_token:string }[];
+
+      console.log(`[import] found ${items.length} accounts from ${lines.length} lines`);
+      if (items.length === 0) { alert('لم يتم العثور على أكونتات صحيحة في النص'); return; }
 
       const importRes  = await fetch('/api/accounts/import', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ accounts: items }) });
       const importData = await importRes.json();
       console.log('[import result]', importData);
-      setShowImport(false);
-      setImportText('');
-      // Small delay to ensure server state is updated before fetching
-      await new Promise(r => setTimeout(r, 100));
+      setShowImport(false); setImportText('');
+      await new Promise(r => setTimeout(r, 150));
       await fetchAccounts();
     } finally { setImporting(false); }
   };
@@ -438,37 +462,50 @@ export default function AppPage() {
 
           {/* Account Bar */}
           {currentAccount ? (
-            <div style={{ padding:'12px 20px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:12, background:'rgba(12,18,32,0.6)', flexShrink:0 }}>
-              {/* Avatar */}
-              <div style={{ width:40, height:40, borderRadius:12, background:'linear-gradient(135deg, rgba(59,130,246,0.2), rgba(139,92,246,0.15))', border:'1px solid rgba(59,130,246,0.2)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                <UserIcon style={{ width:18, height:18, color:'#93c5fd' }} />
+            <div style={{ padding:'10px 20px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:10, background:'rgba(12,18,32,0.6)', flexShrink:0, flexWrap:'wrap' }}>
+
+              {/* ── Email | Password block ── */}
+              <div style={{ display:'flex', alignItems:'center', gap:0, flex:1, minWidth:0, background:'rgba(0,0,0,0.25)', borderRadius:10, border:`1px solid ${C.border}`, overflow:'hidden' }}>
+                {/* Email */}
+                <div style={{ flex:1, minWidth:0, padding:'7px 12px', borderRight:`1px solid ${C.border}` }}>
+                  <p style={{ fontSize:10, fontWeight:700, color: C.text3, letterSpacing:'0.07em', marginBottom:2 }}>EMAIL</p>
+                  <p style={{ fontSize:13, fontWeight:700, color:'#93c5fd', fontFamily:"'JetBrains Mono',monospace", overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{currentAccount.email}</p>
+                </div>
+                {/* Password */}
+                <div style={{ flex:1, minWidth:0, padding:'7px 12px', borderRight:`1px solid ${C.border}` }}>
+                  <p style={{ fontSize:10, fontWeight:700, color: C.text3, letterSpacing:'0.07em', marginBottom:2 }}>PASSWORD</p>
+                  {credentials ? (
+                    <p style={{ fontSize:13, fontWeight:700, color:'#c4b5fd', fontFamily:"'JetBrains Mono',monospace", overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{credentials.password}</p>
+                  ) : (
+                    <p style={{ fontSize:13, color: C.text3, fontFamily:"'JetBrains Mono',monospace" }}>••••••••</p>
+                  )}
+                </div>
+                {/* Copy email|pass */}
+                <button onClick={async () => {
+                  let pass = credentials?.password;
+                  if (!pass) {
+                    const r = await fetch(`/api/accounts/${currentAccount.id}/credentials`);
+                    const d = await r.json();
+                    if (d.success) { setCredentials(d.data); pass = d.data.password; }
+                  }
+                  navigator.clipboard.writeText(`${currentAccount.email}|${pass || ''}`);
+                  setCopiedCode('combo'); setTimeout(() => setCopiedCode(''), 2000);
+                }} title="Copy email|password" style={{ padding:'0 14px', height:'100%', minHeight:52, border:'none', background: copiedCode==='combo' ? 'rgba(16,185,129,0.15)' : 'rgba(59,130,246,0.08)', cursor:'pointer', display:'flex', alignItems:'center', gap:6, flexShrink:0, transition:'all 0.15s' }}>
+                  {copiedCode==='combo' ? <Check style={{ width:14, height:14, color: C.green }} /> : <Copy style={{ width:14, height:14, color:'#60a5fa' }} />}
+                  <span style={{ fontSize:11, fontWeight:700, color: copiedCode==='combo' ? C.green : '#60a5fa', whiteSpace:'nowrap' }}>{copiedCode==='combo' ? 'Copied!' : 'Copy'}</span>
+                </button>
               </div>
-              <div style={{ flex:1, minWidth:0 }}>
-                <p style={{ fontSize:14, fontWeight:700, color: C.text1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{currentAccount.email}</p>
-                <p style={{ fontSize:11, color: C.text3, marginTop:1 }}>Account {currentIndex + 1} of {accounts.length}</p>
-              </div>
+
               {/* Mail count */}
-              <select value={mailCount} onChange={e => setMailCount(e.target.value)} style={{ padding:'6px 10px', borderRadius:8, border:`1px solid ${C.border}`, background:'rgba(255,255,255,0.04)', fontSize:12, color: C.text2, cursor:'pointer', outline:'none' }}>
+              <select value={mailCount} onChange={e => setMailCount(e.target.value)} style={{ padding:'6px 10px', borderRadius:8, border:`1px solid ${C.border}`, background:'rgba(255,255,255,0.04)', fontSize:12, color: C.text2, cursor:'pointer', outline:'none', flexShrink:0 }}>
                 {[5,10,20,50].map(n => <option key={n} value={n}>{n} mails</option>)}
               </select>
-              {/* Credentials btn */}
-              <button onClick={fetchCredentials} title="Show credentials" style={{ width:36, height:36, borderRadius:9, display:'flex', alignItems:'center', justifyContent:'center', border:`1px solid ${showCreds ? 'rgba(139,92,246,0.3)' : C.border}`, background: showCreds ? 'rgba(139,92,246,0.1)' : 'rgba(255,255,255,0.03)', cursor:'pointer', transition:'all 0.15s', flexShrink:0 }}>
-                {loadingCreds ? <RefreshCw style={{ width:14, height:14, color: C.purple, animation:'spin 0.8s linear infinite' }} /> : showCreds ? <EyeOff style={{ width:14, height:14, color: C.purple }} /> : <Eye style={{ width:14, height:14, color: C.text3 }} />}
-              </button>
-              {/* Copy email */}
-              <button onClick={() => { navigator.clipboard.writeText(currentAccount.email); setCopiedCode('email'); setTimeout(() => setCopiedCode(''), 2000); }} style={{ width:36, height:36, borderRadius:9, display:'flex', alignItems:'center', justifyContent:'center', border:`1px solid ${copiedCode === 'email' ? 'rgba(16,185,129,0.3)' : C.border}`, background: copiedCode === 'email' ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.03)', cursor:'pointer', transition:'all 0.15s', flexShrink:0 }}>
-                {copiedCode === 'email' ? <Check style={{ width:14, height:14, color: C.green }} /> : <Copy style={{ width:14, height:14, color: C.text3 }} />}
-              </button>
-              {/* Refresh btn */}
-              <button onClick={fetchMail} disabled={fetching} style={{ width:36, height:36, borderRadius:9, display:'flex', alignItems:'center', justifyContent:'center', border:`1px solid ${C.border}`, background:'rgba(255,255,255,0.03)', cursor:'pointer', opacity: fetching ? 0.4 : 1, flexShrink:0 }}>
-                <RefreshCw style={{ width:14, height:14, color: C.text3, animation: fetching ? 'spin 0.8s linear infinite' : 'none' }} />
-              </button>
               {/* Fetch btn */}
-              <button onClick={fetchMail} disabled={fetching} style={{ padding:'8px 18px', borderRadius:9, border:'none', background:'linear-gradient(135deg, #3b82f6, #6366f1)', color:'white', fontSize:13, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:6, boxShadow:'0 4px 14px rgba(59,130,246,0.3)', opacity: fetching ? 0.5 : 1, whiteSpace:'nowrap', transition:'all 0.2s', flexShrink:0 }}>
-                <Download style={{ width:14, height:14 }} /> {fetching ? 'Loading...' : 'Fetch Mail'}
+              <button onClick={fetchMail} disabled={fetching} style={{ padding:'8px 16px', borderRadius:9, border:'none', background:'linear-gradient(135deg, #3b82f6, #6366f1)', color:'white', fontSize:13, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:6, boxShadow:'0 4px 14px rgba(59,130,246,0.3)', opacity: fetching ? 0.5 : 1, whiteSpace:'nowrap', transition:'all 0.2s', flexShrink:0 }}>
+                <Download style={{ width:14, height:14 }} /> {fetching ? 'Loading...' : 'Fetch'}
               </button>
               {/* Next btn */}
-              <button onClick={fetchAndNext} disabled={fetching || currentIndex >= accounts.length - 1} style={{ padding:'8px 18px', borderRadius:9, border:'none', background:'linear-gradient(135deg, #8b5cf6, #6366f1)', color:'white', fontSize:13, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:6, boxShadow:'0 4px 14px rgba(139,92,246,0.3)', opacity: (fetching || currentIndex >= accounts.length - 1) ? 0.35 : 1, whiteSpace:'nowrap', transition:'all 0.2s', flexShrink:0 }}>
+              <button onClick={fetchAndNext} disabled={fetching || currentIndex >= accounts.length - 1} style={{ padding:'8px 16px', borderRadius:9, border:'none', background:'linear-gradient(135deg, #8b5cf6, #6366f1)', color:'white', fontSize:13, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:6, boxShadow:'0 4px 14px rgba(139,92,246,0.3)', opacity: (fetching || currentIndex >= accounts.length - 1) ? 0.35 : 1, whiteSpace:'nowrap', transition:'all 0.2s', flexShrink:0 }}>
                 <ChevronRight style={{ width:14, height:14 }} /> Next
               </button>
             </div>
@@ -476,27 +513,6 @@ export default function AppPage() {
             <div style={{ padding:'14px 20px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:10, background:'rgba(12,18,32,0.4)', flexShrink:0 }}>
               <Shield style={{ width:16, height:16, color: C.text3 }} />
               <span style={{ fontSize:13, color: C.text3 }}>Select an account from the left panel</span>
-            </div>
-          )}
-
-          {/* Credentials Panel */}
-          {showCreds && credentials && (
-            <div className="animate-in" style={{ padding:'10px 20px', borderBottom:`1px solid rgba(139,92,246,0.12)`, display:'flex', alignItems:'center', gap:14, background:'rgba(139,92,246,0.05)', flexShrink:0 }}>
-              <Eye style={{ width:14, height:14, color: C.purple, flexShrink:0 }} />
-              <div style={{ display:'flex', gap:20, flex:1 }}>
-                <div>
-                  <span style={{ fontSize:9, color: C.text3, fontWeight:700, letterSpacing:'0.08em' }}>EMAIL</span>
-                  <p style={{ fontSize:12, color: C.text1, fontFamily:"'JetBrains Mono', monospace", marginTop:2 }}>{credentials.email}</p>
-                </div>
-                <div>
-                  <span style={{ fontSize:9, color: C.text3, fontWeight:700, letterSpacing:'0.08em' }}>PASSWORD</span>
-                  <p style={{ fontSize:12, color: C.text1, fontFamily:"'JetBrains Mono', monospace", marginTop:2 }}>{credentials.password}</p>
-                </div>
-              </div>
-              <button onClick={() => { navigator.clipboard.writeText(`${credentials.email}:${credentials.password}`); setCopiedCode('creds'); setTimeout(() => setCopiedCode(''), 2000); }} style={{ display:'flex', alignItems:'center', gap:5, padding:'6px 14px', borderRadius:8, border:'none', background: copiedCode === 'creds' ? 'rgba(16,185,129,0.15)' : 'rgba(139,92,246,0.1)', cursor:'pointer', transition:'all 0.2s' }}>
-                {copiedCode === 'creds' ? <Check style={{ width:12, height:12, color: C.green }} /> : <Copy style={{ width:12, height:12, color: C.purple }} />}
-                <span style={{ fontSize:12, fontWeight:700, color: copiedCode === 'creds' ? C.green : C.purple }}>{copiedCode === 'creds' ? 'Copied!' : 'Copy'}</span>
-              </button>
             </div>
           )}
 
