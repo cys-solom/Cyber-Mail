@@ -40,6 +40,7 @@ export default function AppPage() {
   const [importText,    setImportText]      = useState('');
   const [importing,     setImporting]       = useState(false);
   const [searchQuery,   setSearchQuery]     = useState('');
+  const [accountSearchQuery, setAccountSearchQuery] = useState('');
   const [senderFilter,  setSenderFilter]    = useState('');
   const [mailCount,     setMailCount]       = useState('10');
   const [copiedCode,    setCopiedCode]      = useState('');
@@ -471,8 +472,8 @@ export default function AppPage() {
         <aside style={{ ...card, borderRadius:0, borderTop:'none', borderBottom:'none', borderLeft:'none', display:'flex', flexDirection:'column', overflow:'hidden' }}>
 
           {/* Sidebar Header */}
-          <div style={{ padding:'16px 16px 12px', borderBottom:`1px solid ${C.border}` }}>
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+          <div style={{ padding:'16px 16px 12px', borderBottom:`1px solid ${C.border}`, display:'flex', flexDirection:'column', gap:10 }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
               <div style={{ display:'flex', alignItems:'center', gap:7 }}>
                 <Users style={{ width:14, height:14, color: C.text3 }} />
                 <span style={{ fontSize:12, fontWeight:700, color: C.text2, letterSpacing:'0.05em', textTransform:'uppercase' }}>Mailboxes</span>
@@ -482,6 +483,47 @@ export default function AppPage() {
             <button onClick={() => setShowImport(true)} style={{ width:'100%', padding:'10px 0', borderRadius:10, border:'none', background:'linear-gradient(135deg, #3b82f6, #6366f1)', color:'white', fontSize:13, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:6, boxShadow:'0 4px 16px rgba(59,130,246,0.25)', transition:'all 0.2s' }}>
               <Plus style={{ width:15, height:15 }} /> Import Accounts
             </button>
+            {accounts.filter(a => !brokenAccounts.has(a.id)).length > 0 && (
+              <div style={{ position: 'relative', width: '100%' }}>
+                <input
+                  type="text"
+                  placeholder="البحث في الحسابات..."
+                  value={accountSearchQuery}
+                  onChange={e => setAccountSearchQuery(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 30px',
+                    borderRadius: 8,
+                    border: `1px solid ${C.border}`,
+                    background: 'rgba(0,0,0,0.2)',
+                    color: C.text1,
+                    fontSize: 12,
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                    textAlign: 'right',
+                    direction: 'rtl'
+                  }}
+                />
+                <Search style={{ position: 'absolute', left: 10, top: 10, width: 12, height: 12, color: C.text3 }} />
+                {accountSearchQuery && (
+                  <button
+                    onClick={() => setAccountSearchQuery('')}
+                    style={{
+                      position: 'absolute',
+                      right: 10,
+                      top: 8,
+                      background: 'none',
+                      border: 'none',
+                      color: C.text3,
+                      cursor: 'pointer',
+                      fontSize: 12,
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Account List */}
@@ -492,8 +534,16 @@ export default function AppPage() {
                 <p style={{ fontSize:13, color: C.text3 }}>No mailboxes yet</p>
                 <p style={{ fontSize:11, color:'#334155' }}>Click Import above</p>
               </div>
+            ) : accounts.filter(a => !brokenAccounts.has(a.id)).filter(a => !accountSearchQuery || a.email.toLowerCase().includes(accountSearchQuery.toLowerCase())).length === 0 ? (
+              <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding: '20px 10px', gap:10 }}>
+                <Search style={{ width:24, height:24, color: C.text3 }} />
+                <p style={{ fontSize:12, color: C.text3, textAlign: 'center' }}>لا توجد حسابات تطابق البحث</p>
+              </div>
             ) : (
-              accounts.filter(a => !brokenAccounts.has(a.id)).map(acc => {
+              accounts
+                .filter(a => !brokenAccounts.has(a.id))
+                .filter(a => !accountSearchQuery || a.email.toLowerCase().includes(accountSearchQuery.toLowerCase()))
+                .map(acc => {
                 const realIdx = accounts.indexOf(acc);
                 const isSelected  = realIdx === currentIndex;
                 const isUsed      = usedAccounts.has(acc.id);
