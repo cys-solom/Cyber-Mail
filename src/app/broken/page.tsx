@@ -43,7 +43,12 @@ export default function BrokenPage() {
 
   // جلب البيانات
   useEffect(() => {
-    const ids = new Set<string>(JSON.parse(localStorage.getItem('ds_broken') || '[]'));
+    let ids = new Set<string>();
+    try {
+      ids = new Set<string>(JSON.parse(localStorage.getItem('ds_broken') || '[]'));
+    } catch (e) {
+      console.error('Failed to parse ds_broken from localStorage:', e);
+    }
     setBrokenIds(ids);
     setSelected(new Set(ids)); // كل التالفة محددة بالديفولت
 
@@ -51,7 +56,12 @@ export default function BrokenPage() {
       if (d.success) {
         if (d.data && d.data.length === 0) {
           // السيرفر فاضي (cold start) — استعادة من الـ backup تلقائياً
-          const backup = JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
+          let backup: Record<string, any> = {};
+          try {
+            backup = JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
+          } catch (e) {
+            console.error('Failed to parse ds_import_backup from localStorage:', e);
+          }
           const items = Object.values(backup);
           if (items.length > 0) {
             console.log('[auto-restore] restoring from broken page');
@@ -143,7 +153,12 @@ export default function BrokenPage() {
       console.error('Error deleting broken accounts:', e);
     }
 
-    const backup = JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
+    let backup: Record<string, any> = {};
+    try {
+      backup = JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
+    } catch (e) {
+      console.error('Failed to parse ds_import_backup in clearAllBroken:', e);
+    }
     toDelete.forEach(acc => {
       delete backup[acc.email];
     });
