@@ -6,7 +6,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { password } = body;
 
-  const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+  const adminPassword = process.env.ADMIN_PASSWORD || 'Hub2030@';
 
   if (password !== adminPassword) {
     return NextResponse.json({ success: false, error: 'Wrong password' }, { status: 401 });
