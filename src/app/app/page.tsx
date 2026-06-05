@@ -216,28 +216,33 @@ export default function AppPage() {
   // ── Import ──────────────────────────────────────────
   /** يستخرج الأكونتات من أي نص — يتجاهل الإيموجي والترقيم والخطوط */
   const parseLine = (raw: string): { email: string; password: string; client_id: string; refresh_token: string } | null => {
-    // 1. أزل الترقيم في البداية مثل "1. " أو "20. "
-    let line = raw.trim().replace(/^\d+\.\s*/, '');
-    // 2. تأكد إن الخط فيه @ (علامة إيميل)
+    // أزل الترقيم في البداية مثل "1. " أو "20. " ثم تحقق من وجود @
+    const line = raw.trim();
     if (!line.includes('@')) return null;
 
-    let email = '', password = '', thirdField = '', fourthField = '';
+    let emailField = '', password = '', thirdField = '', fourthField = '';
 
     if (line.includes('----')) {
       const parts = line.split('----');
-      email = parts[0]?.trim() || ''; password = parts[1]?.trim() || '';
-      thirdField = parts[2]?.trim() || ''; fourthField = parts[3]?.trim() || '';
+      emailField  = parts[0]?.trim() || '';
+      password    = parts[1]?.trim() || '';
+      thirdField  = parts[2]?.trim() || '';
+      fourthField = parts[3]?.trim() || '';
     } else {
-      // انقسم على أول 3 pipes بس (الـ token ممكن يحتوي على أي حاجة)
       const p1 = line.indexOf('|');
       const p2 = line.indexOf('|', p1 + 1);
       const p3 = line.indexOf('|', p2 + 1);
       if (p1 === -1 || p2 === -1 || p3 === -1) return null;
-      email = line.slice(0, p1).trim();
-      password = line.slice(p1 + 1, p2).trim();
-      thirdField = line.slice(p2 + 1, p3).trim();
+      emailField  = line.slice(0, p1).trim();
+      password    = line.slice(p1 + 1, p2).trim();
+      thirdField  = line.slice(p2 + 1, p3).trim();
       fourthField = line.slice(p3 + 1).trim();
     }
+
+    // استخرج الإيميل الصحيح بـ regex (يتجاهل أي إيموجي أو أرقام أو رموز قبله)
+    const emailMatch = emailField.match(/[\w.+\-]+@[\w\-]+\.[\w.]+/);
+    if (!emailMatch) return null;
+    const email = emailMatch[0].trim();
 
     const uuidRx = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     let client_id: string, refresh_token: string;
