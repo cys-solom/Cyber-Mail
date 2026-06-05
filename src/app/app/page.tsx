@@ -245,9 +245,20 @@ export default function AppPage() {
   };
 
   const clearAll = async () => {
-    setAccounts([]); setCurrentIndex(-1); setMessages([]); setOtpResults([]); setUsedAccounts(new Set());
+    // 1. مسح كل الأكونتات من الـ storage فعلياً
+    try { await fetch('/api/accounts/clear', { method: 'DELETE' }); } catch {}
+    // 2. مسح الـ UI state
+    setAccounts([]);
+    setCurrentIndex(-1);
+    setMessages([]);
+    setOtpResults([]);
+    setUsedAccounts(new Set());
+    setCredentials(null);
+    setShowCreds(false);
+    // 3. مسح الـ localStorage
     localStorage.removeItem('ds_currentIndex');
-    try { await fetch('/api/accounts/used', { method:'DELETE' }); } catch {}
+    localStorage.removeItem('ds_activated');
+    setActivatedAccounts(new Set());
   };
 
   // ── Export ──────────────────────────────────────────

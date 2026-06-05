@@ -59,6 +59,12 @@ async function getAccounts(): Promise<AccountRecord[]> {
   return _cache;
 }
 
+/** Reset in-process cache — call after delete/clear operations */
+function invalidateCache(): void {
+  _cache = [];
+  _cacheLoaded = true;  // keep as loaded so we don't re-read stale disk data
+}
+
 async function persistAccounts(): Promise<void> {
   if (!_cache) return;
   const backend = await getBackend();
@@ -164,6 +170,15 @@ export const accountsStore = {
     const all = await getAccounts();
     all.forEach(a => { a.is_used = false; });
     await persistAccounts();
+  },
+
+  /** Delete ALL accounts from storage and reset cache */
+  async deleteAll(): Promise<void> {
+    invalidateCache();           // reset in-memory cache to empty
+    if (!_cache) _cache = [];
+    _cache.length = 0;           // clear the array in-place
+    const backend = await getBackend();
+    await backend.saveAccounts([]);  // persist empty array
   },
 };
 
