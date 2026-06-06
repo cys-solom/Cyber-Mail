@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Shield, Copy, Check, Trash2, ArrowLeft,
-  Search, FileDown, X, RefreshCw, Zap, RotateCcw, Send
+  Search, FileDown, X, RefreshCw, Zap, RotateCcw, Send, Download
 } from 'lucide-react';
 
 interface ExportedAccount {
@@ -36,6 +36,8 @@ export default function ActivatedPage() {
   const [copiedAll, setCopiedAll] = useState(false);
   const [showClear, setShowClear] = useState(false);
   const [restoredEmails, setRestoredEmails] = useState<Set<string>>(new Set());
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportModalCopied, setExportModalCopied] = useState(false);
 
   useEffect(() => { loadAccounts(); }, []);
 
@@ -79,6 +81,27 @@ export default function ActivatedPage() {
     const a = document.createElement('a');
     a.href = url;
     a.download = `activated_${new Date().toISOString().slice(0, 10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Export modal helpers — exports ALL accounts (not filtered)
+  const exportAllText = allList.map(a =>
+    a.authCode ? `${a.email}|${a.password}|${a.authCode}` : `${a.email}|${a.password}`
+  ).join('\n');
+
+  const copyExportAll = () => {
+    navigator.clipboard.writeText(exportAllText);
+    setExportModalCopied(true);
+    setTimeout(() => setExportModalCopied(false), 2000);
+  };
+
+  const downloadExportAll = () => {
+    const blob = new Blob([exportAllText], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `all_activated_${new Date().toISOString().slice(0, 10)}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -168,6 +191,18 @@ export default function ActivatedPage() {
               <Send style={{ width: 10, height: 10, color: C.purple }} />
               <span style={{ fontSize: 11, fontWeight: 700, color: '#c084fc' }}>{jumpedCount} jumped</span>
             </div>
+          )}
+          {/* ── Export All Button ── */}
+          {allList.length > 0 && (
+            <button
+              onClick={() => { setShowExportModal(true); setExportModalCopied(false); }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(16,185,129,0.25)', background: 'rgba(16,185,129,0.1)', cursor: 'pointer', transition: 'all 0.2s' }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(16,185,129,0.18)'; e.currentTarget.style.borderColor = 'rgba(16,185,129,0.4)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(16,185,129,0.1)'; e.currentTarget.style.borderColor = 'rgba(16,185,129,0.25)'; }}
+            >
+              <Download style={{ width: 13, height: 13, color: C.green }} />
+              <span style={{ fontSize: 12, fontWeight: 700, color: C.green }}>Export All ({allList.length})</span>
+            </button>
           )}
           <button onClick={loadAccounts} style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${C.border}`, background: 'rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
             <RefreshCw style={{ width: 14, height: 14, color: C.text3 }} />
@@ -341,6 +376,101 @@ export default function ActivatedPage() {
             <div style={{ display: 'flex', gap: 10 }}>
               <button onClick={() => setShowClear(false)} style={{ flex: 1, padding: '10px 0', borderRadius: 9, border: `1px solid ${C.border}`, background: 'transparent', color: C.text2, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
               <button onClick={clearAll} style={{ flex: 1, padding: '10px 0', borderRadius: 9, border: 'none', background: 'linear-gradient(135deg, #dc2626, #ef4444)', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Clear All</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ EXPORT ALL MODAL ══ */}
+      {showExportModal && (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+          onClick={() => setShowExportModal(false)}
+        >
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(12px)' }} />
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              position: 'relative',
+              ...card,
+              width: '100%',
+              maxWidth: 520,
+              display: 'flex',
+              flexDirection: 'column',
+              maxHeight: '80vh',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 20px', borderBottom: `1px solid ${C.border}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 10, background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Download style={{ width: 16, height: 16, color: C.green }} />
+                </div>
+                <div>
+                  <p style={{ fontSize: 15, fontWeight: 800, color: C.text1 }}>Export All Activated</p>
+                  <p style={{ fontSize: 11, color: C.text3, marginTop: 1 }}>{allList.length} accounts · email|password</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowExportModal(false)}
+                style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${C.border}`, background: 'rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+              >
+                <X style={{ width: 14, height: 14, color: C.text3 }} />
+              </button>
+            </div>
+
+            {/* Accounts list */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '10px 0' }}>
+              {allList.map((acc, i) => (
+                <div key={acc.email} style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '10px 20px',
+                  borderBottom: i < allList.length - 1 ? `1px solid rgba(255,255,255,0.03)` : 'none',
+                }}>
+                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: acc.jumped ? C.purple : C.green, boxShadow: `0 0 6px ${acc.jumped ? C.purple : C.green}`, flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: acc.jumped ? '#c4b5fd' : '#6ee7b7', fontFamily: "'JetBrains Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {acc.email}
+                    </p>
+                    <p style={{ fontSize: 11, color: C.text3, fontFamily: "'JetBrains Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
+                      {acc.password}{acc.authCode ? ` | ${acc.authCode}` : ''}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Actions */}
+            <div style={{ padding: '14px 20px', borderTop: `1px solid ${C.border}`, display: 'flex', gap: 10 }}>
+              <button
+                onClick={copyExportAll}
+                style={{
+                  flex: 1, padding: '11px 0', borderRadius: 10, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+                  fontWeight: 700, fontSize: 13, transition: 'all 0.15s',
+                  background: exportModalCopied ? 'rgba(16,185,129,0.15)' : 'rgba(16,185,129,0.08)',
+                  border: `1px solid ${exportModalCopied ? 'rgba(16,185,129,0.35)' : 'rgba(16,185,129,0.15)'}`,
+                  color: C.green,
+                }}
+              >
+                {exportModalCopied ? <Check style={{ width: 14, height: 14 }} /> : <Copy style={{ width: 14, height: 14 }} />}
+                {exportModalCopied ? 'Copied!' : `Copy All (${allList.length})`}
+              </button>
+              <button
+                onClick={downloadExportAll}
+                style={{
+                  flex: 1, padding: '11px 0', borderRadius: 10, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+                  fontWeight: 700, fontSize: 13, transition: 'all 0.15s',
+                  background: 'rgba(99,102,241,0.08)',
+                  border: '1px solid rgba(99,102,241,0.2)',
+                  color: '#a5b4fc',
+                }}
+              >
+                <FileDown style={{ width: 14, height: 14 }} />
+                Download .TXT
+              </button>
             </div>
           </div>
         </div>

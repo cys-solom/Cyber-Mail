@@ -443,7 +443,7 @@ export default function AppPage() {
 
   // ── Export ──────────────────────────────────────────
   // الأكونتات المُفعَّلة الصحيحة (بدون broken)
-  const trueActivated = accounts.filter(a => activatedAccounts.has(a.id) && !brokenAccounts.has(a.id));
+  const trueActivated = accounts.filter(a => activatedAccounts.has(a.id) && !brokenAccounts.has(a.id) && !jumpedAccounts.has(a.id));
 
   const openExportModal = async () => {
     setShowExport(true); setExportCopied(false);
