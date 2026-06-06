@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  Shield, Copy, Check, Trash2, Download, ArrowLeft,
-  Search, FileDown, X, RefreshCw, Zap
+  Shield, Copy, Check, Trash2, ArrowLeft,
+  Search, FileDown, X, RefreshCw, Zap, RotateCcw, Send
 } from 'lucide-react';
 
 interface ExportedAccount {
@@ -12,6 +12,7 @@ interface ExportedAccount {
   password: string;
   authCode?: string;
   exportedAt: string;
+  jumped?: boolean;
 }
 
 const C = {
@@ -34,18 +35,15 @@ export default function ActivatedPage() {
   const [copied, setCopied] = useState('');
   const [copiedAll, setCopiedAll] = useState(false);
   const [showClear, setShowClear] = useState(false);
+  const [restoredEmails, setRestoredEmails] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    loadAccounts();
-  }, []);
+  useEffect(() => { loadAccounts(); }, []);
 
   const loadAccounts = () => {
     try {
       const data = JSON.parse(localStorage.getItem('ds_exported_accounts') || '{}');
       setAccounts(data);
-    } catch {
-      setAccounts({});
-    }
+    } catch { setAccounts({}); }
   };
 
   const allList = Object.values(accounts).sort(
@@ -94,11 +92,40 @@ export default function ActivatedPage() {
     });
   };
 
+  // ── Restore: أعد الأكونت للقائمة الرئيسية (أزله من ds_jumped)
+  const restoreAccount = (email: string) => {
+    try {
+      const jumped: string[] = JSON.parse(localStorage.getItem('ds_jumped') || '[]');
+      // البحث عن الـ account بالإيميل — نحتاج نعرف الـ id
+      // نحذفه من ds_jumped بالإيميل (بعد إيجاد الـ id عبر backup)
+      const backup: Record<string, { email: string }> = JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
+      // الـ id يُحسب من hash الإيميل لكن مش عندنا access للـ crypto هنا
+      // بدل كده: نحفظ الإيميل في قائمة "مستعادة" ونزيل الـ id من ds_jumped عن طريق مقارنة الإيميل بالـ accounts
+      // نمسح الأكونت من ds_jumped — الـ app page يشيل العناصر الراجعة
+      const allAccounts: {id:string;email:string}[] = JSON.parse(localStorage.getItem('ds_accounts_map') || '[]');
+      const found = allAccounts.find(a => a.email === email);
+      if (found) {
+        const filtered2 = jumped.filter(id => id !== found.id);
+        localStorage.setItem('ds_jumped', JSON.stringify(filtered2));
+      } else {
+        // fallback: خلي الـ app page يعمل sync عند الرجوع
+        // نحفظ قائمة استعادة بالإيميل
+        const restoreList: string[] = JSON.parse(localStorage.getItem('ds_restore_queue') || '[]');
+        if (!restoreList.includes(email)) restoreList.push(email);
+        localStorage.setItem('ds_restore_queue', JSON.stringify(restoreList));
+      }
+    } catch {}
+    // عرض الزر كـ "مستعاد"
+    setRestoredEmails(prev => new Set([...prev, email]));
+  };
+
   const clearAll = () => {
     localStorage.removeItem('ds_exported_accounts');
     setAccounts({});
     setShowClear(false);
   };
+
+  const jumpedCount = allList.filter(a => a.jumped).length;
 
   const card: React.CSSProperties = {
     background: C.card,
@@ -123,10 +150,8 @@ export default function ActivatedPage() {
             <div style={{ width: 32, height: 32, borderRadius: 9, background: 'linear-gradient(135deg, rgba(139,92,246,0.25), rgba(59,130,246,0.15))', border: '1px solid rgba(139,92,246,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Shield style={{ width: 16, height: 16, color: C.purple }} />
             </div>
-            <div>
-              <div style={{ fontSize: 15, fontWeight: 900, color: C.text1 }}>
-                Cyber<span style={{ background: 'linear-gradient(135deg, #8b5cf6, #3b82f6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>Mail</span>
-              </div>
+            <div style={{ fontSize: 15, fontWeight: 900, color: C.text1 }}>
+              Cyber<span style={{ background: 'linear-gradient(135deg, #8b5cf6, #3b82f6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>Mail</span>
             </div>
             <div style={{ width: 1, height: 18, background: C.border }} />
             <span style={{ fontSize: 11, color: C.purple, fontWeight: 700, letterSpacing: '0.08em' }}>ACTIVATED ACCOUNTS</span>
@@ -134,9 +159,16 @@ export default function ActivatedPage() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* Stats pills */}
           <div style={{ padding: '4px 12px', borderRadius: 100, background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.2)' }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: C.purple }}>{allList.length} saved</span>
           </div>
+          {jumpedCount > 0 && (
+            <div style={{ padding: '4px 10px', borderRadius: 100, background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.15)', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <Send style={{ width: 10, height: 10, color: C.purple }} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#c084fc' }}>{jumpedCount} jumped</span>
+            </div>
+          )}
           <button onClick={loadAccounts} style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${C.border}`, background: 'rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
             <RefreshCw style={{ width: 14, height: 14, color: C.text3 }} />
           </button>
@@ -149,18 +181,17 @@ export default function ActivatedPage() {
       </header>
 
       {/* ══ CONTENT ══ */}
-      <div style={{ flex: 1, padding: '24px 28px', maxWidth: 820, width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
+      <div style={{ flex: 1, padding: '24px 28px', maxWidth: 860, width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
 
         {allList.length === 0 ? (
-          /* Empty State */
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 400, textAlign: 'center', gap: 16 }}>
             <div style={{ width: 72, height: 72, borderRadius: 22, background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Shield style={{ width: 34, height: 34, color: 'rgba(139,92,246,0.4)' }} />
             </div>
             <div>
               <p style={{ fontSize: 18, fontWeight: 800, color: C.text1, marginBottom: 8 }}>No activated accounts yet</p>
-              <p style={{ fontSize: 13, color: C.text3, lineHeight: 1.7, maxWidth: 360, margin: '0 auto' }}>
-                Mark accounts with ✓ in the main page, then click <strong style={{ color: C.green }}>Export</strong> to save them here permanently.
+              <p style={{ fontSize: 13, color: C.text3, lineHeight: 1.7, maxWidth: 380, margin: '0 auto' }}>
+                Mark accounts with ✓ then click <strong style={{ color: C.green }}>Export</strong>, or use the <strong style={{ color: '#c084fc' }}>Jump</strong> button (🟣 arrow) to send them here directly.
               </p>
             </div>
             <button onClick={() => router.push('/app')} style={{ marginTop: 8, padding: '10px 24px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg, #8b5cf6, #3b82f6)', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -198,71 +229,98 @@ export default function ActivatedPage() {
             {/* Accounts List */}
             <div style={{ ...card, overflow: 'hidden' }}>
               {filtered.length === 0 ? (
-                <div style={{ padding: '32px 0', textAlign: 'center', color: C.text3, fontSize: 13 }}>No results for "{search}"</div>
+                <div style={{ padding: '32px 0', textAlign: 'center', color: C.text3, fontSize: 13 }}>No results for &ldquo;{search}&rdquo;</div>
               ) : (
-                filtered.map((acc, i) => (
-                  <div key={acc.email} style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    padding: '12px 16px',
-                    borderBottom: i < filtered.length - 1 ? `1px solid rgba(255,255,255,0.03)` : 'none',
-                    transition: 'background 0.12s',
-                  }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(139,92,246,0.04)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                  >
-                    {/* Status dot */}
-                    <div style={{ width: 7, height: 7, borderRadius: '50%', background: C.purple, boxShadow: `0 0 6px ${C.purple}`, flexShrink: 0 }} />
+                filtered.map((acc, i) => {
+                  const isJumped = !!acc.jumped;
+                  const isRestored = restoredEmails.has(acc.email);
+                  return (
+                    <div key={acc.email} style={{
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      padding: '11px 16px',
+                      borderBottom: i < filtered.length - 1 ? `1px solid rgba(255,255,255,0.03)` : 'none',
+                      transition: 'background 0.12s',
+                      background: isJumped ? 'rgba(139,92,246,0.03)' : 'transparent',
+                    }}
+                      onMouseEnter={e => (e.currentTarget.style.background = isJumped ? 'rgba(139,92,246,0.07)' : 'rgba(139,92,246,0.04)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = isJumped ? 'rgba(139,92,246,0.03)' : 'transparent')}
+                    >
+                      {/* Status dot — بنفسجي إذا Jumped، أخضر إذا عادي */}
+                      <div style={{ width: 7, height: 7, borderRadius: '50%', background: isJumped ? C.purple : C.green, boxShadow: `0 0 6px ${isJumped ? C.purple : C.green}`, flexShrink: 0 }} />
 
-                    {/* Email */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: 13, fontWeight: 600, color: '#c4b5fd', fontFamily: "'JetBrains Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {acc.email}
-                      </p>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
-                        <p style={{ fontSize: 11, color: C.text3, fontFamily: "'JetBrains Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {acc.password}
+                      {/* Jump badge */}
+                      {isJumped && (
+                        <div style={{ padding: '1px 6px', borderRadius: 4, background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.25)', display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
+                          <Send style={{ width: 8, height: 8, color: '#c084fc' }} />
+                          <span style={{ fontSize: 8, fontWeight: 800, color: '#c084fc', letterSpacing: '0.05em' }}>JUMP</span>
+                        </div>
+                      )}
+
+                      {/* Email + Password */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: 13, fontWeight: 600, color: isJumped ? '#c4b5fd' : '#6ee7b7', fontFamily: "'JetBrains Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {acc.email}
                         </p>
-                        {acc.authCode && (
-                          <span style={{ padding: '1px 6px', borderRadius: 4, background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.3)', fontSize: 10, fontWeight: 700, color: '#c084fc', fontFamily: "'JetBrains Mono', monospace", flexShrink: 0 }}>
-                            {acc.authCode}
-                          </span>
-                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                          <p style={{ fontSize: 11, color: C.text3, fontFamily: "'JetBrains Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {acc.password}
+                          </p>
+                          {acc.authCode && (
+                            <span style={{ padding: '1px 6px', borderRadius: 4, background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.3)', fontSize: 10, fontWeight: 700, color: '#c084fc', fontFamily: "'JetBrains Mono', monospace", flexShrink: 0 }}>
+                              {acc.authCode}
+                            </span>
+                          )}
+                        </div>
                       </div>
+
+                      {/* Time */}
+                      <span style={{ fontSize: 10, color: C.text3, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                        {new Date(acc.exportedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+
+                      {/* Restore button — فقط للـ Jumped */}
+                      {isJumped && (
+                        <button
+                          onClick={() => restoreAccount(acc.email)}
+                          title="استعادة للقائمة الرئيسية"
+                          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 7, border: isRestored ? '1px solid rgba(16,185,129,0.3)' : '1px solid rgba(139,92,246,0.25)', background: isRestored ? 'rgba(16,185,129,0.1)' : 'rgba(139,92,246,0.1)', cursor: 'pointer', flexShrink: 0, transition: 'all 0.15s' }}
+                        >
+                          {isRestored
+                            ? <><Check style={{ width: 11, height: 11, color: C.green }} /><span style={{ fontSize: 10, fontWeight: 700, color: C.green }}>Restored</span></>
+                            : <><RotateCcw style={{ width: 11, height: 11, color: '#c084fc' }} /><span style={{ fontSize: 10, fontWeight: 700, color: '#c084fc' }}>Restore</span></>
+                          }
+                        </button>
+                      )}
+
+                      {/* Copy button */}
+                      <button
+                        onClick={() => copyOne(acc.email, acc.password, acc.authCode)}
+                        style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${copied === acc.email ? 'rgba(16,185,129,0.3)' : C.border}`, background: copied === acc.email ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.03)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.15s' }}
+                      >
+                        {copied === acc.email
+                          ? <Check style={{ width: 12, height: 12, color: C.green }} />
+                          : <Copy style={{ width: 12, height: 12, color: C.text3 }} />
+                        }
+                      </button>
+
+                      {/* Remove button */}
+                      <button
+                        onClick={() => removeOne(acc.email)}
+                        style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid rgba(239,68,68,0.1)', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.15s', opacity: 0.5 }}
+                        onMouseEnter={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(239,68,68,0.08)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        <X style={{ width: 12, height: 12, color: C.red }} />
+                      </button>
                     </div>
-
-                    {/* Time */}
-                    <span style={{ fontSize: 10, color: C.text3, whiteSpace: 'nowrap', flexShrink: 0 }}>
-                      {new Date(acc.exportedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                    </span>
-
-                    {/* Copy button */}
-                    <button
-                      onClick={() => copyOne(acc.email, acc.password, acc.authCode)}
-                      style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${copied === acc.email ? 'rgba(16,185,129,0.3)' : C.border}`, background: copied === acc.email ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.03)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.15s' }}
-                    >
-                      {copied === acc.email
-                        ? <Check style={{ width: 12, height: 12, color: C.green }} />
-                        : <Copy style={{ width: 12, height: 12, color: C.text3 }} />
-                      }
-                    </button>
-
-                    {/* Remove button */}
-                    <button
-                      onClick={() => removeOne(acc.email)}
-                      style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid rgba(239,68,68,0.1)', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.15s', opacity: 0.5 }}
-                      onMouseEnter={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(239,68,68,0.08)'; }}
-                      onMouseLeave={e => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.background = 'transparent'; }}
-                    >
-                      <X style={{ width: 12, height: 12, color: C.red }} />
-                    </button>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 
-            {/* Footer count */}
+            {/* Footer */}
             <p style={{ textAlign: 'center', fontSize: 11, color: C.text3, marginTop: 12, fontWeight: 600 }}>
-              {filtered.length} of {allList.length} accounts shown
+              {filtered.length} of {allList.length} accounts · {jumpedCount} jumped
             </p>
           </>
         )}

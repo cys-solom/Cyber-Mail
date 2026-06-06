@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   Mail, Users, Plus, Search, Download, Trash2, X, Copy, Check,
   ChevronLeft, ChevronRight, Key, User as UserIcon, ArrowLeft,
-  RefreshCw, Eye, EyeOff, LogOut, FileDown, Zap, Shield, Activity
+  RefreshCw, Eye, EyeOff, LogOut, FileDown, Zap, Shield, Activity, Send
 } from 'lucide-react';
 
 interface EmailAccount { id: string; email: string; status: string; health_score: number; }
@@ -61,6 +61,9 @@ export default function AppPage() {
   const [brokenAccounts, setBrokenAccounts] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('ds_broken') || '[]')); } catch { return new Set(); }
   });
+  const [jumpedAccounts, setJumpedAccounts] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('ds_jumped') || '[]')); } catch { return new Set(); }
+  });
   const [showBroken, setShowBroken] = useState(false);
   const [showExport,    setShowExport]      = useState(false);
   const [exportCopied,  setExportCopied]    = useState(false);
@@ -74,7 +77,7 @@ export default function AppPage() {
 
   const currentAccount = currentIndex >= 0 ? accounts[currentIndex] : null;
 
-  const visibleAccounts = accounts.filter(a => !brokenAccounts.has(a.id));
+  const visibleAccounts = accounts.filter(a => !brokenAccounts.has(a.id) && !jumpedAccounts.has(a.id));
   const filteredAccounts = visibleAccounts.filter(a => !accountSearchQuery || a.email.toLowerCase().includes(accountSearchQuery.toLowerCase()));
   const displayedAccounts = [...filteredAccounts].sort((a, b) => {
     const aAct = activatedAccounts.has(a.id) ? 1 : 0;
@@ -113,6 +116,26 @@ export default function AppPage() {
 
   // ── Accounts ────────────────────────────────────────
   const fetchAccounts = async () => {
+    // معالجة قائمة الاستعادة من صفحة activated
+    try {
+      const restoreQueue: string[] = JSON.parse(localStorage.getItem('ds_restore_queue') || '[]');
+      if (restoreQueue.length > 0) {
+        const jumped: string[] = JSON.parse(localStorage.getItem('ds_jumped') || '[]');
+        // جلب الأكونتات لمعرفة الـ IDs
+        const res0 = await fetch('/api/accounts');
+        const json0 = await res0.json();
+        if (json0.success && json0.data) {
+          const toRestoreIds = json0.data
+            .filter((a: EmailAccount) => restoreQueue.includes(a.email))
+            .map((a: EmailAccount) => a.id);
+          const newJumped = jumped.filter(id => !toRestoreIds.includes(id));
+          localStorage.setItem('ds_jumped', JSON.stringify(newJumped));
+          setJumpedAccounts(new Set(newJumped));
+        }
+        localStorage.removeItem('ds_restore_queue');
+      }
+    } catch {}
+
     try {
       const res  = await fetch('/api/accounts');
       const json = await res.json();
@@ -138,6 +161,11 @@ export default function AppPage() {
         setBrokenAccounts(prev => {
           const next = new Set([...prev].filter(id => validIds.has(id)));
           try { localStorage.setItem('ds_broken', JSON.stringify([...next])); } catch {}
+          return next;
+        });
+        setJumpedAccounts(prev => {
+          const next = new Set([...prev].filter(id => validIds.has(id)));
+          try { localStorage.setItem('ds_jumped', JSON.stringify([...next])); } catch {}
           return next;
         });
         setAuthCodes(prev => {
@@ -487,6 +515,45 @@ export default function AppPage() {
     });
   };
 
+  // ── Jump to Activated ──────────────────────────────
+  const jumpToActivated = async (acc: EmailAccount, e: React.MouseEvent) => {
+    e.stopPropagation();
+    // 1. أخفي من القائمة الرئيسية
+    setJumpedAccounts(prev => {
+      const next = new Set(prev);
+      next.add(acc.id);
+      try { localStorage.setItem('ds_jumped', JSON.stringify([...next])); } catch {}
+      return next;
+    });
+    // 2. احفظ في صفحة الـ activated
+    try {
+      let backup: Record<string, {email:string;password:string}> = {};
+      try { backup = JSON.parse(localStorage.getItem('ds_import_backup') || '{}'); } catch {}
+      let password = '???';
+      // حاول تجيب الباسورد من السيرفر أولاً
+      try {
+        const res = await fetch(`/api/accounts/${acc.id}/credentials`);
+        const data = await res.json();
+        if (data.success && data.data?.password) password = data.data.password;
+      } catch {}
+      // fallback من الـ backup
+      if (password === '???') {
+        const entry = backup[acc.email] || Object.values(backup).find(b => b.email === acc.email);
+        if (entry?.password) password = entry.password;
+      }
+      const existing: Record<string, {email:string;password:string;authCode?:string;exportedAt:string;jumped?:boolean}> =
+        JSON.parse(localStorage.getItem('ds_exported_accounts') || '{}');
+      existing[acc.email] = {
+        email: acc.email,
+        password,
+        authCode: authCodes[acc.id],
+        exportedAt: new Date().toISOString(),
+        jumped: true,
+      };
+      localStorage.setItem('ds_exported_accounts', JSON.stringify(existing));
+    } catch {}
+  };
+
   const openAuthInput = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (showAuthInput === id) { setShowAuthInput(null); return; }
@@ -672,6 +739,12 @@ export default function AppPage() {
                       <button onClick={e => toggleBroken(acc.id, acc.email, e)} title="تحديد كتالف/معطوب" style={{ width:16, height:16, borderRadius:4, border:'1px solid rgba(239,68,68,0.15)', background:'transparent', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', flexShrink:0, transition:'all 0.15s', opacity:0.5 }}
                         onMouseEnter={e => (e.currentTarget.style.opacity='1')} onMouseLeave={e => (e.currentTarget.style.opacity='0.5')}>
                         <span style={{ fontSize:8, color:'#f87171' }}>✕</span>
+                      </button>
+                      {/* زر Jump — إرسال للـ activated وإخفاء من القائمة */}
+                      <button onClick={e => jumpToActivated(acc, e)} title="إرسال لصفحة المفعّلة وإخفاء من القائمة" style={{ width:16, height:16, borderRadius:4, border:'1px solid rgba(139,92,246,0.2)', background:'transparent', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', flexShrink:0, transition:'all 0.15s', opacity:0.5 }}
+                        onMouseEnter={e => { e.currentTarget.style.opacity='1'; e.currentTarget.style.background='rgba(139,92,246,0.12)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.opacity='0.5'; e.currentTarget.style.background='transparent'; }}>
+                        <Send style={{ width:8, height:8, color:'#c084fc' }} />
                       </button>
                       {/* Status dot */}
                       <div style={{ width:7, height:7, borderRadius:'50%', flexShrink:0, background: isSelected ? C.blue : isActivated ? C.green : isUsed ? C.amber : C.text3, boxShadow: isSelected ? `0 0 8px ${C.blue}` : isActivated ? `0 0 8px ${C.green}` : 'none', transition:'all 0.2s' }} />
