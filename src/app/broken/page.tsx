@@ -214,7 +214,7 @@ export default function BrokenPage() {
     <div style={{ minHeight: '100vh', background: C.bg, color: C.text1, fontFamily: "'Inter', sans-serif" }}>
 
       {/* ══ Header ══ */}
-      <header style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '16px 28px', borderBottom: `1px solid ${C.border}`, background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(20px)', flexWrap: 'wrap', gap: 12 } as React.CSSProperties}>
+      <header style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 28px', borderBottom: `1px solid ${C.border}`, background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(20px)', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button onClick={() => router.push('/app')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 9, border: `1px solid ${C.border}`, background: 'rgba(255,255,255,0.04)', color: C.text2, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
             <ArrowLeft style={{ width: 15, height: 15 }} /> رجوع
