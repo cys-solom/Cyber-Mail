@@ -208,49 +208,6 @@ router.delete('/platform-cdks/:id', adminAuth, async (req, res) => {
 
 // ==================== ORDERS ====================
 
-// Re-fetch offer_url from remote API for a specific order
-router.post('/orders/:id/fetch-link', adminAuth, async (req, res) => {
-    const order = await db.getOrder(req.params.id);
-    if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
-    if (!order.remote_task_id || !order.source_cdkey_id) return res.status(400).json({ success: false, error: 'Order has no remote task ID' });
-
-    const sourceKey = await db.getSourceCDKey(order.source_cdkey_id);
-    if (!sourceKey) return res.status(500).json({ success: false, error: 'Source key not found' });
-
-    try {
-        const result = await AiDoneClient.getStatus(sourceKey.cdkey, order.email, order.remote_task_id);
-        if (!result.success) return res.status(500).json({ success: false, error: result.error || 'Failed to fetch status' });
-
-        const offerUrl = result.data?.offer_url || '';
-        const hasOfferUrl = !!result.data?.has_offer_url;
-        const message = result.data?.message || order.result_message || '';
-        const remoteStatus = (result.data?.status || '').toLowerCase();
-        let newStatus = order.status;
-        if (remoteStatus === 'success' || remoteStatus === 'completed') newStatus = 'success';
-        else if (remoteStatus === 'failed' || remoteStatus === 'error') newStatus = 'failed';
-        else if (remoteStatus === 'running' || remoteStatus === 'processing') newStatus = 'running';
-
-        await db.updateOrderStatus(newStatus, message, offerUrl, hasOfferUrl, order.id);
-        await db.insertLog(order.cdk_id, order.id, 'admin_fetch_link', `Admin re-fetched link for order #${order.id} — status: ${newStatus}, has_url: ${hasOfferUrl}`);
-
-        res.json({ success: true, status: newStatus, offer_url: offerUrl, has_offer_url: hasOfferUrl, message, raw: result.data });
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
-
-// Manually set offer_url for an order (admin override)
-router.post('/orders/:id/set-link', adminAuth, async (req, res) => {
-    const { offer_url } = req.body;
-    if (!offer_url) return res.status(400).json({ success: false, error: 'offer_url is required' });
-    const order = await db.getOrder(req.params.id);
-    if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
-
-    await db.updateOrderStatus('success', order.result_message || 'Manually resolved by admin', offer_url, true, order.id);
-    await db.insertLog(order.cdk_id, order.id, 'admin_set_link', `Admin manually set offer_url for order #${order.id}`);
-    res.json({ success: true, message: 'Link set and order marked as success' });
-});
-
 router.get('/orders', adminAuth, async (req, res) => {
     const { q } = req.query; // search query
     let orders = await db.getAllOrders();

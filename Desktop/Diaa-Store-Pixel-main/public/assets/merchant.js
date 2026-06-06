@@ -661,40 +661,11 @@ function renderOrderActions(order) {
         a += `<span style="font-size:11px;color:var(--accent-amber);"><div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:4px;border-top-color:var(--accent-amber);"></div></span>`;
     }
     if (['failed', 'cancelled'].includes(order.status)) a += `<button class="btn btn-sm" style="background:linear-gradient(135deg,rgba(251,146,60,0.15),rgba(245,158,11,0.1));color:#fbbf24;border:1px solid rgba(251,146,60,0.25);font-size:11px;font-weight:600;" onclick="retryOrder(${order.id})" title="Retry">🔄</button>`;
-    // ── Fetch Link button: show for cancelled/failed orders that have a remote task ID ──
-    if (['failed', 'cancelled', 'success'].includes(order.status) && !order.offer_url) {
-        a += `<button class="btn btn-sm" id="fetch-link-btn-${order.id}" style="background:linear-gradient(135deg,rgba(0,200,255,0.15),rgba(59,107,255,0.1));color:var(--cyan);border:1px solid rgba(0,200,255,0.25);font-size:11px;font-weight:600;" onclick="fetchOrderLink(${order.id})" title="Try to fetch link from remote">🔗 Get Link</button>`;
-    }
     if (order.status === 'pending') a += `<button class="btn btn-danger btn-sm" onclick="cancelOrder(${order.id})">${t('cancel_btn')}</button>`;
     if (order.has_offer_url && order.status === 'failed') a += `<button class="btn btn-cyan btn-sm" onclick="purchaseLink(${order.id})">${t('buy_link')}</button>`;
     if (order.offer_url && order.status === 'success') a += `<button class="btn btn-sm" style="background:rgba(52,211,153,0.1);color:#34d399;border:1px solid rgba(52,211,153,0.2);font-size:12px;" onclick="copyText('${order.offer_url}')" title="Copy Link">📋</button>`;
     return a || '<span style="color:var(--text-muted);">—</span>';
 }
-
-async function fetchOrderLink(orderId) {
-    const btn = document.getElementById(`fetch-link-btn-${orderId}`);
-    if (btn) { btn.disabled = true; btn.textContent = '⏳...'; }
-    try {
-        const result = await api('/fetch-link', { order_id: orderId });
-        if (result.success && result.offer_url) {
-            showToast('✅ Link found! Refreshing...', 'success');
-            // Update local order object immediately
-            const o = orders.find(x => x.id === orderId);
-            if (o) { o.offer_url = result.offer_url; o.status = result.status || o.status; o.message = result.message || o.message; }
-            await refreshData();
-        } else if (result.success && !result.offer_url) {
-            showToast('⚠️ Order found but link not available yet from remote API', 'warning');
-            if (btn) { btn.disabled = false; btn.textContent = '🔗 Get Link'; }
-        } else {
-            showToast(result.error || 'Failed to fetch link', 'error');
-            if (btn) { btn.disabled = false; btn.textContent = '🔗 Get Link'; }
-        }
-    } catch (err) {
-        showToast('Network error', 'error');
-        if (btn) { btn.disabled = false; btn.textContent = '🔗 Get Link'; }
-    }
-}
-
 
 function showOrderInfo(email, password, twofa, orderId) {
     // Remove existing modal if any

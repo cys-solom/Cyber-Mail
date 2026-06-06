@@ -34,21 +34,11 @@ async function syncOrders() {
             else if (remoteStatus === 'failed' || remoteStatus === 'error') newStatus = 'failed';
             else if (remoteStatus === 'running' || remoteStatus === 'processing') newStatus = 'running';
 
-            const hasOfferUrl = !!result.data.has_offer_url;
-            const offerUrl = result.data.offer_url || '';
-            const message = result.data.message || '';
-
-            // ── CRITICAL FIX: if task_type=extract succeeded but offer_url is missing,
-            //    keep the order in 'running' state until link arrives (don't lose it)
-            if (newStatus === 'success' && (order.task_type === 'extract' || order.task_type === 'full') && !offerUrl && !hasOfferUrl) {
-                console.log(`[OrderSync] Order #${order.id} reported success but NO offer_url yet — keeping as running`);
-                if (currentStatus !== 'running') {
-                    await db.updateOrderStatus('running', 'Processing — waiting for link...', '', false, order.id);
-                }
-                continue; // don't proceed to mark as success
-            }
-
             if (newStatus !== currentStatus) {
+                const hasOfferUrl = !!result.data.has_offer_url;
+                const offerUrl = result.data.offer_url || '';
+                const message = result.data.message || '';
+
                 await db.updateOrderStatus(newStatus, message, offerUrl, hasOfferUrl, order.id);
 
                 if (newStatus === 'failed') {
@@ -60,7 +50,7 @@ async function syncOrders() {
                     console.log(`[OrderSync] Order #${order.id} FAILED → Refunded ${order.charged_points} points`);
                 } else if (newStatus === 'success') {
                     await db.insertLog(order.cdk_id, order.id, 'success', `Order completed — ${message}`);
-                    console.log(`[OrderSync] Order #${order.id} SUCCESS — offer_url: ${offerUrl ? 'YES' : 'MISSING'}`);
+                    console.log(`[OrderSync] Order #${order.id} SUCCESS`);
                 }
 
                 if (order.webhook_url) {

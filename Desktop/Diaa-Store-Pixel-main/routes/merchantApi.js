@@ -202,45 +202,6 @@ router.post('/purchase_link', async (req, res) => {
     res.json({ success: true, offer_url: result.offer_url, remaining_uses: newBalance });
 });
 
-// ==================== FETCH LINK FOR EXISTING ORDER ====================
-router.post('/fetch-link', async (req, res) => {
-    const { order_id } = req.body;
-    const cdk = req.cdk;
-    if (!order_id) return res.status(400).json({ success: false, error: 'order_id is required' });
-    const order = await db.getOrderForCDK(order_id, cdk.id);
-    if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
-    if (!order.remote_task_id) return res.status(400).json({ success: false, error: 'Order has no remote task ID to query' });
-
-    const sourceKey = await db.getSourceCDKey(order.source_cdkey_id);
-    if (!sourceKey) return res.status(500).json({ success: false, error: 'Source key not found for this order' });
-
-    try {
-        const result = await AiDoneClient.getStatus(sourceKey.cdkey, order.email, order.remote_task_id);
-        if (!result.success || !result.data) {
-            return res.status(500).json({ success: false, error: result.error || 'Failed to fetch status from remote' });
-        }
-
-        const offerUrl = result.data.offer_url || '';
-        const hasOfferUrl = !!result.data.has_offer_url;
-        const message = result.data.message || order.result_message || '';
-        const remoteStatus = (result.data.status || '').toLowerCase();
-        let newStatus = order.status;
-        if (remoteStatus === 'success' || remoteStatus === 'completed') newStatus = 'success';
-        else if (remoteStatus === 'failed' || remoteStatus === 'error') newStatus = 'failed';
-        else if (remoteStatus === 'running' || remoteStatus === 'processing') newStatus = 'running';
-
-        // Update the order if we got new info
-        if (offerUrl || newStatus !== order.status) {
-            await db.updateOrderStatus(newStatus, message, offerUrl, hasOfferUrl, order.id);
-            await db.insertLog(cdk.id, order.id, 'fetch_link', `Merchant re-fetched link for order #${order.id} — status: ${newStatus}, has_url: ${hasOfferUrl}`);
-        }
-
-        return res.json({ success: true, offer_url: offerUrl, has_offer_url: hasOfferUrl, status: newStatus, message });
-    } catch (err) {
-        return res.status(500).json({ success: false, error: err.message });
-    }
-});
-
 // ==================== ALL ORDERS ====================
 router.post('/orders', async (req, res) => {
     const cdk = req.cdk;
