@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   Mail, Users, Plus, Search, Download, Trash2, X, Copy, Check,
   ChevronLeft, ChevronRight, Key, User as UserIcon, ArrowLeft,
-  RefreshCw, Eye, EyeOff, LogOut, FileDown, Zap, Shield, Activity, Send
+  RefreshCw, Eye, EyeOff, LogOut, FileDown, Zap, Shield, Activity, Send, AlertTriangle
 } from 'lucide-react';
 
 interface EmailAccount { id: string; email: string; status: string; health_score: number; }
@@ -636,6 +636,12 @@ export default function AppPage() {
             <div style={{ width:6, height:6, background: C.green, borderRadius:'50%', boxShadow:`0 0 8px ${C.green}` }} />
             <span style={{ fontSize:11, fontWeight:700, color: C.green }}>{accounts.length} Accounts</span>
           </div>
+          {brokenAccounts.size > 0 && (
+            <button onClick={() => router.push('/broken')} style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 14px', borderRadius:100, background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)', cursor:'pointer', transition:'all 0.2s' }}>
+              <AlertTriangle style={{ width:13, height:13, color: C.red }} />
+              <span style={{ fontSize:11, fontWeight:700, color: C.red }}>تالف ({brokenAccounts.size})</span>
+            </button>
+          )}
           {trueActivated.length > 0 && (
             <button onClick={openExportModal} style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 14px', borderRadius:100, background:'rgba(16,185,129,0.1)', border:'1px solid rgba(16,185,129,0.2)', cursor:'pointer', transition:'all 0.2s' }}>
               <FileDown style={{ width:13, height:13, color: C.green }} />
