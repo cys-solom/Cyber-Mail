@@ -187,6 +187,10 @@ export default function AppPage() {
           if (prev === -1 || prev >= visible.length) return 0;
           return prev;
         });
+        // ✅ حفظ خريطة email→id في localStorage لاستخدامها في صفحة activated عند الـ Restore
+        try {
+          localStorage.setItem('ds_accounts_map', JSON.stringify(visible.map((a: EmailAccount) => ({ id: a.id, email: a.email }))));
+        } catch {}
         // Merge server-side is_used with localStorage persisted used
         const serverUsedIds = json.data.filter((a: any) => a.is_used).map((a: any) => a.id);
         const localUsed: Set<string> = (() => { try { return new Set(JSON.parse(localStorage.getItem('ds_used') || '[]')); } catch { return new Set(); } })();
@@ -427,10 +431,14 @@ export default function AppPage() {
     localStorage.removeItem('ds_plus1');
     localStorage.removeItem('ds_auth_codes');
     localStorage.removeItem('ds_broken');
+    localStorage.removeItem('ds_jumped');
     localStorage.removeItem('ds_used');
-    localStorage.removeItem('ds_import_backup'); // ✅ مسح الـ backup فقط عند Clear
+    localStorage.removeItem('ds_accounts_map');
+    localStorage.removeItem('ds_restore_queue');
+    localStorage.removeItem('ds_import_backup');
+    // ds_exported_accounts يبقى عمداً (سجل دائم للمُصدَّرة)
     setPlusTagged(new Set()); setAuthCodes({}); setShowAuthInput(null);
-    setBrokenAccounts(new Set());
+    setBrokenAccounts(new Set()); setJumpedAccounts(new Set());
   };
 
   // ── Export ──────────────────────────────────────────
