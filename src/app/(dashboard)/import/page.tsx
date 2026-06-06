@@ -25,29 +25,69 @@ export default function ImportPage() {
 
   const parseInput = () => {
     const lines = rawInput.trim().split('\n').filter(Boolean);
-    const items: ImportLine[] = lines.map((line) => {
-      const parts = line.split('----');
-      if (parts.length < 4) {
-        return {
-          email: parts[0] || '',
-          password: '',
-          client_id: '',
-          refresh_token: '',
-          valid: false,
-          error: 'Invalid format — need 4 fields separated by ----',
-        };
+    const items: ImportLine[] = [];
+
+    for (const raw of lines) {
+      const line = raw.trim();
+
+      // تجاهل الخطوط الفاصلة مثل ────────────
+      if (!line.includes('@')) continue;
+
+      let emailField = '', password = '', thirdField = '', fourthField = '';
+
+      if (line.includes('----')) {
+        // صيغة: email----password----client_id----refresh_token
+        const parts = line.split('----');
+        if (parts.length < 4) {
+          items.push({ email: parts[0] || '', password: '', client_id: '', refresh_token: '', valid: false, error: 'Invalid format — need 4 fields' });
+          continue;
+        }
+        emailField  = parts[0]?.trim() || '';
+        password    = parts[1]?.trim() || '';
+        thirdField  = parts[2]?.trim() || '';
+        fourthField = parts[3]?.trim() || '';
+      } else {
+        // صيغة: email|password|refresh_token|client_id
+        const p1 = line.indexOf('|');
+        const p2 = p1 !== -1 ? line.indexOf('|', p1 + 1) : -1;
+        const p3 = p2 !== -1 ? line.indexOf('|', p2 + 1) : -1;
+        if (p1 === -1 || p2 === -1 || p3 === -1) {
+          items.push({ email: line.slice(0, p1 > -1 ? p1 : undefined) || line, password: '', client_id: '', refresh_token: '', valid: false, error: 'Invalid format — need 4 fields separated by |' });
+          continue;
+        }
+        emailField  = line.slice(0, p1).trim();
+        password    = line.slice(p1 + 1, p2).trim();
+        thirdField  = line.slice(p2 + 1, p3).trim();
+        fourthField = line.slice(p3 + 1).trim();
       }
-      return {
-        email: parts[0].trim(),
-        password: parts[1].trim(),
-        client_id: parts[2].trim(),
-        refresh_token: parts[3].trim(),
-        valid: true,
-      };
-    });
+
+      // استخرج الإيميل الصحيح (يتجاهل الأرقام والرموز قبله مثل "9. ")
+      const emailMatch = emailField.match(/[\w.+\-]+@[\w\-]+\.[\w.]+/);
+      if (!emailMatch) {
+        items.push({ email: emailField, password, client_id: '', refresh_token: '', valid: false, error: 'Invalid email address' });
+        continue;
+      }
+      const email = emailMatch[0].trim();
+
+      // حدد client_id و refresh_token بناءً على أيهما UUID
+      const uuidRx = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      let client_id: string, refresh_token: string;
+      if (uuidRx.test(fourthField))      { refresh_token = thirdField;  client_id = fourthField; }
+      else if (uuidRx.test(thirdField))  { client_id = thirdField;      refresh_token = fourthField; }
+      else                               { refresh_token = thirdField;   client_id = fourthField; }
+
+      if (!email || !password || !client_id || !refresh_token) {
+        items.push({ email, password, client_id, refresh_token, valid: false, error: 'Missing required fields' });
+        continue;
+      }
+
+      items.push({ email, password, client_id, refresh_token, valid: true });
+    }
+
     setParsed(items);
     setStep('preview');
   };
+
 
   const handleImport = async () => {
     setImporting(true);
@@ -97,11 +137,14 @@ export default function ImportPage() {
             <div className="flex items-start gap-3 p-4 mb-5 rounded-xl bg-sky-500/8/60 border border-sky-200/30">
               <AlertCircle className="w-5 h-5 text-sky-500 mt-0.5 shrink-0" />
               <div>
-                <p className="text-sm font-medium text-sky-400">Import Format</p>
+                <p className="text-sm font-medium text-sky-400">Supported Import Formats</p>
+                <code className="block mt-1 text-xs text-sky-400 font-mono bg-sky-500/15/60 p-2 rounded-lg">
+                  email|password|refresh_token|client_id
+                </code>
                 <code className="block mt-1 text-xs text-sky-400 font-mono bg-sky-500/15/60 p-2 rounded-lg">
                   email----password----client_id----refresh_token
                 </code>
-                <p className="text-xs text-sky-400/70 mt-1">One account per line. Fields separated by four dashes (----).</p>
+                <p className="text-xs text-sky-400/70 mt-1">One account per line. Numbered lines (e.g. "9. email@...") and separator lines (────) are automatically skipped.</p>
               </div>
             </div>
 
@@ -113,7 +156,7 @@ export default function ImportPage() {
               <textarea
                 value={rawInput}
                 onChange={(e) => setRawInput(e.target.value)}
-                placeholder="user@outlook.com----password123----abc-client-id----refresh-token-here"
+                placeholder={`email@hotmail.com|password123|M.C515_BAY...$$ |9e5f94bc-e8a4-4e73-b8be-63364c29d753\n9. email2@hotmail.com|pass2|token...|client-uuid\n────────────  (separator lines are ignored)`}
                 rows={12}
                 className="w-full px-4 py-3 bg-white/70 border border-blue-100 rounded-xl text-sm font-mono text-slate-700 placeholder:text-slate-400 focus:bg-white/90 focus:border-blue-300 transition-all resize-none"
               />
