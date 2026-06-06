@@ -44,7 +44,9 @@ export default function AppPage() {
   const [senderFilter,  setSenderFilter]    = useState('');
   const [mailCount,     setMailCount]       = useState('10');
   const [copiedCode,    setCopiedCode]      = useState('');
-  const [usedAccounts,  setUsedAccounts]    = useState<Set<string>>(new Set());
+  const [usedAccounts,  setUsedAccounts]    = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('ds_used') || '[]')); } catch { return new Set(); }
+  });
   const [activatedAccounts, setActivatedAccounts] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('ds_activated') || '[]')); } catch { return new Set(); }
   });
@@ -157,8 +159,12 @@ export default function AppPage() {
           if (prev === -1 || prev >= visible.length) return 0;
           return prev;
         });
-        const usedIds = json.data.filter((a: any) => a.is_used).map((a: any) => a.id);
-        setUsedAccounts(new Set(usedIds));
+        // Merge server-side is_used with localStorage persisted used
+        const serverUsedIds = json.data.filter((a: any) => a.is_used).map((a: any) => a.id);
+        const localUsed: Set<string> = (() => { try { return new Set(JSON.parse(localStorage.getItem('ds_used') || '[]')); } catch { return new Set(); } })();
+        const mergedUsed = new Set([...serverUsedIds, ...[...localUsed].filter(id => validIds.has(id))]);
+        setUsedAccounts(mergedUsed);
+        try { localStorage.setItem('ds_used', JSON.stringify([...mergedUsed])); } catch {}
       }
     } catch (err) { console.error('[fetchAccounts]', err); }
   };
@@ -220,6 +226,7 @@ export default function AppPage() {
       const will = !next.has(id);
       will ? next.add(id) : next.delete(id);
       markUsedOnServer(id, will);
+      try { localStorage.setItem('ds_used', JSON.stringify([...next])); } catch {}
       return next;
     });
   };
@@ -247,7 +254,11 @@ export default function AppPage() {
       }
       if (data.data?.messages) setMessages(data.data.messages);
       if (data.data?.otps)     setOtpResults(data.data.otps);
-      setUsedAccounts(prev => { const n = new Set([...prev, currentAccount.id]); return n; });
+      setUsedAccounts(prev => {
+        const n = new Set([...prev, currentAccount.id]);
+        try { localStorage.setItem('ds_used', JSON.stringify([...n])); } catch {}
+        return n;
+      });
       markUsedOnServer(currentAccount.id, true);
     } catch(e) {
       setFetchError(String(e));
@@ -272,7 +283,11 @@ export default function AppPage() {
         if (!res.ok || !data.success) { setFetchError(data.error || `Error ${res.status}`); return; }
         if (data.data?.messages) setMessages(data.data.messages);
         if (data.data?.otps)     setOtpResults(data.data.otps);
-        setUsedAccounts(prev => { const n = new Set([...prev, nextAcc.id]); return n; });
+        setUsedAccounts(prev => {
+          const n = new Set([...prev, nextAcc.id]);
+          try { localStorage.setItem('ds_used', JSON.stringify([...n])); } catch {}
+          return n;
+        });
         markUsedOnServer(nextAcc.id, true);
       } catch(e) {
         setFetchError(String(e));
@@ -384,17 +399,24 @@ export default function AppPage() {
     localStorage.removeItem('ds_plus1');
     localStorage.removeItem('ds_auth_codes');
     localStorage.removeItem('ds_broken');
+    localStorage.removeItem('ds_used');
     localStorage.removeItem('ds_import_backup'); // ✅ مسح الـ backup فقط عند Clear
     setPlusTagged(new Set()); setAuthCodes({}); setShowAuthInput(null);
     setBrokenAccounts(new Set());
   };
 
   // ── Export ──────────────────────────────────────────
+  // الأكونتات المُفعَّلة الصحيحة (بدون broken)
+  const trueActivated = accounts.filter(a => activatedAccounts.has(a.id) && !brokenAccounts.has(a.id));
+
   const openExportModal = async () => {
     setShowExport(true); setExportCopied(false);
-    const activated = accounts.filter(a => activatedAccounts.has(a.id));
+    const activated = trueActivated;
     if (!activated.length) { setExportData([]); return; }
     setLoadingExport(true);
+    // جلب الـ backup للاستخدام كـ fallback للـ password
+    let backup: Record<string, {email:string;password:string;client_id?:string;refresh_token?:string}> = {};
+    try { backup = JSON.parse(localStorage.getItem('ds_import_backup') || '{}'); } catch {}
     try {
       const results = await Promise.all(
         activated.map(async acc => {
@@ -406,11 +428,41 @@ export default function AppPage() {
               ? acc.email.replace('@', '+1@')
               : acc.email;
             const authCode = authCodes[acc.id] || undefined;
-            return { email: exportEmail, password: data.success ? data.data.password : '???', originalEmail: acc.email, isPlusTagged: plusTagged.has(acc.id), authCode };
-          } catch { return { email: acc.email, password: '???', originalEmail: acc.email, isPlusTagged: false }; }
+            // إذا فشلت الـ credentials API، نستخدم الـ backup كـ fallback
+            let password = '???' ;
+            if (data.success && data.data?.password) {
+              password = data.data.password;
+            } else {
+              // fallback: ابحث في الـ backup بالإيميل
+              const backupEntry = backup[acc.email] || Object.values(backup).find(b => b.email === acc.email);
+              if (backupEntry?.password) password = backupEntry.password;
+            }
+            return { email: exportEmail, password, originalEmail: acc.email, isPlusTagged: plusTagged.has(acc.id), authCode };
+          } catch {
+            // fallback من الـ backup عند الخطأ
+            const backupEntry = backup[acc.email] || Object.values(backup).find(b => b.email === acc.email);
+            const password = backupEntry?.password || '???';
+            return { email: acc.email, password, originalEmail: acc.email, isPlusTagged: false };
+          }
         })
       );
       setExportData(results);
+      // ✅ حفظ في localStorage للصفحة المستقلة
+      try {
+        const existingExported: Record<string, {email:string;password:string;authCode?:string;exportedAt:string}> =
+          JSON.parse(localStorage.getItem('ds_exported_accounts') || '{}');
+        results.forEach(r => {
+          if (r.password !== '???') {
+            existingExported[r.originalEmail || r.email] = {
+              email: r.email,
+              password: r.password,
+              authCode: r.authCode,
+              exportedAt: new Date().toISOString(),
+            };
+          }
+        });
+        localStorage.setItem('ds_exported_accounts', JSON.stringify(existingExported));
+      } catch {}
     } finally { setLoadingExport(false); }
   };
 
@@ -509,12 +561,16 @@ export default function AppPage() {
             <div style={{ width:6, height:6, background: C.green, borderRadius:'50%', boxShadow:`0 0 8px ${C.green}` }} />
             <span style={{ fontSize:11, fontWeight:700, color: C.green }}>{accounts.length} Accounts</span>
           </div>
-          {activatedAccounts.size > 0 && (
+          {trueActivated.length > 0 && (
             <button onClick={openExportModal} style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 14px', borderRadius:100, background:'rgba(16,185,129,0.1)', border:'1px solid rgba(16,185,129,0.2)', cursor:'pointer', transition:'all 0.2s' }}>
               <FileDown style={{ width:13, height:13, color: C.green }} />
-              <span style={{ fontSize:11, fontWeight:700, color: C.green }}>Export ({activatedAccounts.size})</span>
+              <span style={{ fontSize:11, fontWeight:700, color: C.green }}>Export ({trueActivated.length})</span>
             </button>
           )}
+          <button onClick={() => router.push('/activated')} style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 14px', borderRadius:100, background:'rgba(139,92,246,0.08)', border:'1px solid rgba(139,92,246,0.15)', cursor:'pointer', transition:'all 0.2s' }}>
+            <Shield style={{ width:13, height:13, color: C.purple }} />
+            <span style={{ fontSize:11, fontWeight:700, color: C.purple }}>Activated</span>
+          </button>
           <button onClick={handleLogout} style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 14px', borderRadius:100, background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.1)', cursor:'pointer', transition:'all 0.2s' }}>
             <LogOut style={{ width:13, height:13, color: C.red }} />
             <span style={{ fontSize:11, fontWeight:700, color: C.red }}>Logout</span>
