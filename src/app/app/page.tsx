@@ -798,18 +798,10 @@ export default function AppPage() {
 
 
           {/* Sidebar Footer */}
-          <div style={{ padding:'10px 12px', borderTop:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div style={{ padding:'10px 12px', borderTop:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'flex-start' }}>
             <button onClick={clearAll} style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 10px', borderRadius:7, border:`1px solid ${C.border}`, background:'transparent', color: C.text3, fontSize:11, fontWeight:600, cursor:'pointer' }}>
               <Trash2 style={{ width:11, height:11 }} /> Clear
             </button>
-            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              {brokenAccounts.size > 0 && (
-                <button onClick={() => router.push('/broken')} style={{ display:'flex', alignItems:'center', gap:4, padding:'3px 8px', borderRadius:6, border:'1px solid rgba(239,68,68,0.3)', background:'rgba(239,68,68,0.08)', color:'#f87171', fontSize:10, fontWeight:700, cursor:'pointer' }}>
-                  ⚠️ تالف ({brokenAccounts.size})
-                </button>
-              )}
-              {activatedAccounts.size > 0 && <span style={{ color: C.green, fontWeight:600, fontSize:11 }}>✓ {activatedAccounts.size}</span>}
-            </div>
           </div>
 
           {/* ── Navigation ── */}
@@ -846,7 +838,16 @@ export default function AppPage() {
                     <p style={{ fontSize:10, fontWeight:700, color: C.text3, letterSpacing:'0.07em', marginBottom:2 }}>EMAIL</p>
                     <p style={{ fontSize:13, fontWeight:700, color:'#93c5fd', fontFamily:"'JetBrains Mono',monospace", overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{currentAccount.email}</p>
                   </div>
-                  <button onClick={() => { navigator.clipboard.writeText(currentAccount.email); setCopiedCode('email'); setTimeout(() => setCopiedCode(''), 2000); }}
+                  <button onClick={async () => {
+                      try { await navigator.clipboard.writeText(currentAccount.email); }
+                      catch {
+                        const el = document.createElement('textarea');
+                        el.value = currentAccount.email; el.style.position = 'fixed'; el.style.opacity = '0';
+                        document.body.appendChild(el); el.focus(); el.select();
+                        document.execCommand('copy'); document.body.removeChild(el);
+                      }
+                      setCopiedCode('email'); setTimeout(() => setCopiedCode(''), 2000);
+                    }}
                     title="Copy email" style={{ width:28, height:28, borderRadius:7, border:`1px solid ${copiedCode==='email' ? 'rgba(16,185,129,0.4)' : C.border}`, background: copiedCode==='email' ? 'rgba(16,185,129,0.12)' : 'rgba(255,255,255,0.04)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, transition:'all 0.15s' }}>
                     {copiedCode==='email' ? <Check style={{ width:12, height:12, color: C.green }} /> : <Copy style={{ width:12, height:12, color:'#60a5fa' }} />}
                   </button>
@@ -864,11 +865,33 @@ export default function AppPage() {
                   <button onClick={async () => {
                     let pass = credentials?.password;
                     if (!pass) {
-                      const r = await fetch(`/api/accounts/${currentAccount.id}/credentials`);
-                      const d = await r.json();
-                      if (d.success) { setCredentials(d.data); pass = d.data.password; }
+                      try {
+                        const r = await fetch(`/api/accounts/${currentAccount.id}/credentials`);
+                        const d = await r.json();
+                        if (d.success) { setCredentials(d.data); pass = d.data.password; }
+                      } catch {}
+                      // fallback من الـ backup
+                      if (!pass) {
+                        try {
+                          const backup: Record<string,{email:string;password:string}> = JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
+                          const entry = backup[currentAccount.email] || Object.values(backup).find((b:any) => b.email === currentAccount.email);
+                          if (entry?.password) pass = entry.password;
+                        } catch {}
+                      }
                     }
-                    if (pass) { navigator.clipboard.writeText(pass); setCopiedCode('pass'); setTimeout(() => setCopiedCode(''), 2000); }
+                    if (pass) {
+                      try {
+                        await navigator.clipboard.writeText(pass);
+                      } catch {
+                        // fallback للمتصفحات التي لا تدعم Clipboard API
+                        const el = document.createElement('textarea');
+                        el.value = pass; el.style.position = 'fixed'; el.style.opacity = '0';
+                        document.body.appendChild(el); el.focus(); el.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(el);
+                      }
+                      setCopiedCode('pass'); setTimeout(() => setCopiedCode(''), 2000);
+                    }
                   }} title="Copy password" style={{ width:28, height:28, borderRadius:7, border:`1px solid ${copiedCode==='pass' ? 'rgba(16,185,129,0.4)' : C.border}`, background: copiedCode==='pass' ? 'rgba(16,185,129,0.12)' : 'rgba(255,255,255,0.04)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, transition:'all 0.15s' }}>
                     {copiedCode==='pass' ? <Check style={{ width:12, height:12, color: C.green }} /> : <Copy style={{ width:12, height:12, color:'#c4b5fd' }} />}
                   </button>
