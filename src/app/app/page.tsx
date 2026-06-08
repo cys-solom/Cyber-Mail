@@ -411,35 +411,34 @@ export default function AppPage() {
         return;
       }
 
-      const importRes  = await fetch('/api/accounts/import', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ accounts: items }) });
+      const importRes = await fetch('/api/accounts/import', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ accounts: items }) });
       const importData = await importRes.json();
       console.log('[import result]', importData);
 
-      const s = importData.data?.success ?? 0;
-      const f = importData.data?.failed  ?? 0;
-      const errs = importData.data?.errors ?? [];
+      const s    = importData.data?.success ?? 0;
+      const f    = importData.data?.failed  ?? 0;
+      const errs = importData.data?.errors  ?? [];
       setImportResult({ parsed: items.length, success: s, failed: f, errors: errs });
 
-      // ✅ حفظ backup في localStorage عشان ما تضيعش عند الـ refresh
+      // ✅ حفظ backup في localStorage
       const existing: Record<string,typeof items[0]> = JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
       for (const item of items) existing[item.email] = item;
       localStorage.setItem('ds_import_backup', JSON.stringify(existing));
 
-      // إذا نجح ولو واحد، حدّث القائمة
-      if (s > 0) {
-        setImportText('');
-        await new Promise(r => setTimeout(r, 200));
-        await fetchAccounts();
-      }
     } catch (err) {
       setImportResult({ parsed: 0, success: 0, failed: 1, errors: [{ email: '', error: String(err) }] });
     } finally { setImporting(false); }
   };
 
-  const closeImportModal = () => {
+  const closeImportModal = async () => {
+    const hadSuccess = importResult && importResult.success > 0;
     setShowImport(false);
     setImportText('');
     setImportResult(null);
+    // تحديث القائمة بعد إغلاق المودال مباشرة
+    if (hadSuccess) {
+      await fetchAccounts();
+    }
   };
 
   const clearAll = async () => {
