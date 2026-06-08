@@ -19,6 +19,7 @@ export class KVBackend implements StorageBackend {
       return Array.isArray(data) ? data : [];
     } catch (err) {
       console.error('[kv-backend] load error:', err);
+      // أعد مصفوفة فارغة فقط كـ fallback — الـ cache في local-store سيعوّض
       return [];
     }
   }
@@ -28,7 +29,17 @@ export class KVBackend implements StorageBackend {
       const { kv } = await import('@vercel/kv');
       await kv.set(KV_KEY, accounts);
     } catch (err) {
-      console.error('[kv-backend] save error:', err);
+      console.error('[kv-backend] save error (attempt 1):', err);
+      // retry مرة واحدة بعد ثانية
+      try {
+        await new Promise(r => setTimeout(r, 1000));
+        const { kv } = await import('@vercel/kv');
+        await kv.set(KV_KEY, accounts);
+        console.log('[kv-backend] save succeeded on retry');
+      } catch (err2) {
+        console.error('[kv-backend] save error (attempt 2 — giving up):', err2);
+      }
     }
   }
 }
+

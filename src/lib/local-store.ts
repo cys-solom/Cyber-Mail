@@ -146,6 +146,72 @@ export const accountsStore = {
     return record;
   },
 
+  /** Insert multiple accounts in a single persist — much faster for bulk imports */
+  async insertBatch(items: {
+    email: string;
+    encrypted_password: string;
+    client_id: string;
+    encrypted_refresh_token: string;
+    status?: AccountStatus;
+    health_score?: number;
+  }[]): Promise<{ success: number; failed: number; errors: { email: string; error: string }[] }> {
+    const all = await getAccounts();
+    let success = 0;
+    let failed = 0;
+    const errors: { email: string; error: string }[] = [];
+
+    for (const data of items) {
+      try {
+        if (!data.email || !data.encrypted_password || !data.client_id || !data.encrypted_refresh_token) {
+          failed++;
+          errors.push({ email: data.email || '', error: 'Missing required fields' });
+          continue;
+        }
+        const existing = all.find(a => a.email.toLowerCase() === data.email.trim().toLowerCase());
+        if (existing) {
+          Object.assign(existing, {
+            encrypted_password:      data.encrypted_password,
+            client_id:               data.client_id.trim(),
+            encrypted_refresh_token: data.encrypted_refresh_token,
+            status:                  data.status ?? 'active',
+            health_score:            data.health_score ?? 100,
+            updated_at:              now(),
+          });
+          success++;
+        } else {
+          all.push({
+            id:                       getStableId(data.email),
+            email:                    data.email.trim(),
+            encrypted_password:       data.encrypted_password,
+            client_id:                data.client_id.trim(),
+            encrypted_refresh_token:  data.encrypted_refresh_token,
+            status:                   (data.status ?? 'active') as AccountStatus,
+            health_score:             data.health_score ?? 100,
+            last_checked_at:          undefined,
+            last_code:                undefined,
+            last_code_at:             undefined,
+            notes:                    undefined,
+            assigned_to:              undefined,
+            token_expires_at:         undefined,
+            total_fetches:            0,
+            total_otps:               0,
+            is_used:                  false,
+            created_at:               now(),
+            updated_at:               now(),
+          });
+          success++;
+        }
+      } catch (err: unknown) {
+        failed++;
+        errors.push({ email: data.email || '', error: String(err) });
+      }
+    }
+
+    // حفظ مرة واحدة فقط بعد إدخال كل الحسابات
+    if (success > 0) await persistAccounts();
+    return { success, failed, errors };
+  },
+
   async update(id: string, patch: Record<string, unknown>): Promise<AccountRecord | null> {
     const all = await getAccounts();
     const idx = all.findIndex(a => a.id === id);

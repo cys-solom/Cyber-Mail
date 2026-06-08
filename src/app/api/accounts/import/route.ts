@@ -14,37 +14,40 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: 'No accounts provided' }, { status: 400 });
   }
 
-  let success = 0;
-  let failed = 0;
-  const errors: { line: number; email: string; error: string }[] = [];
+  // تحقق من الحقول وشفّر كل حساب
+  const items: Parameters<typeof accountsStore.insertBatch>[0] = [];
+  const parseErrors: { email: string; error: string }[] = [];
 
-  for (let i = 0; i < accounts.length; i++) {
-    const { email, password, client_id, refresh_token } = accounts[i];
-
+  for (const acc of accounts) {
+    const { email, password, client_id, refresh_token } = acc;
     if (!email || !password || !client_id || !refresh_token) {
-      failed++;
-      errors.push({ line: i + 1, email: email || '', error: 'Missing required fields' });
+      parseErrors.push({ email: email || '', error: 'Missing required fields' });
       continue;
     }
-
     try {
-      await accountsStore.insert({
+      items.push({
         email: email.trim(),
-        encrypted_password: encrypt(password),
-        client_id: client_id.trim(),
+        encrypted_password:      encrypt(password),
+        client_id:               client_id.trim(),
         encrypted_refresh_token: encrypt(refresh_token),
-        status: 'active',
+        status:  'active',
         health_score: 100,
       });
-      success++;
-    } catch (err: unknown) {
-      failed++;
-      errors.push({ line: i + 1, email, error: String(err) });
+    } catch (err) {
+      parseErrors.push({ email, error: `Encrypt error: ${String(err)}` });
     }
   }
 
+  // إدخال الكل في عملية واحدة
+  const result = await accountsStore.insertBatch(items);
+
   return NextResponse.json({
     success: true,
-    data: { total: accounts.length, success, failed, errors },
+    data: {
+      total:   accounts.length,
+      success: result.success,
+      failed:  result.failed + parseErrors.length,
+      errors:  [...parseErrors, ...result.errors],
+    },
   });
 }

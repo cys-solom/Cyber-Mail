@@ -39,6 +39,7 @@ export default function AppPage() {
   const [showImport,    setShowImport]      = useState(false);
   const [importText,    setImportText]      = useState('');
   const [importing,     setImporting]       = useState(false);
+  const [importResult,  setImportResult]    = useState<{parsed:number;success:number;failed:number;errors:{email:string;error:string}[]} | null>(null);
   const [searchQuery,   setSearchQuery]     = useState('');
   const [accountSearchQuery, setAccountSearchQuery] = useState('');
   const [senderFilter,  setSenderFilter]    = useState('');
@@ -399,26 +400,46 @@ export default function AppPage() {
   const handleImport = async () => {
     if (!importText.trim()) return;
     setImporting(true);
+    setImportResult(null);
     try {
       const lines = importText.trim().split('\n');
       const items = lines.map(l => parseLine(l)).filter(Boolean) as { email:string; password:string; client_id:string; refresh_token:string }[];
 
       console.log(`[import] found ${items.length} accounts from ${lines.length} lines`);
-      if (items.length === 0) { alert('لم يتم العثور على أكونتات صحيحة في النص'); return; }
+      if (items.length === 0) {
+        setImportResult({ parsed: 0, success: 0, failed: lines.filter(Boolean).length, errors: [{ email: '', error: 'لم يتم العثور على أكونتات صحيحة — تأكد من الصيغة' }] });
+        return;
+      }
 
       const importRes  = await fetch('/api/accounts/import', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ accounts: items }) });
       const importData = await importRes.json();
       console.log('[import result]', importData);
+
+      const s = importData.data?.success ?? 0;
+      const f = importData.data?.failed  ?? 0;
+      const errs = importData.data?.errors ?? [];
+      setImportResult({ parsed: items.length, success: s, failed: f, errors: errs });
 
       // ✅ حفظ backup في localStorage عشان ما تضيعش عند الـ refresh
       const existing: Record<string,typeof items[0]> = JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
       for (const item of items) existing[item.email] = item;
       localStorage.setItem('ds_import_backup', JSON.stringify(existing));
 
-      setShowImport(false); setImportText('');
-      await new Promise(r => setTimeout(r, 150));
-      await fetchAccounts();
+      // إذا نجح ولو واحد، حدّث القائمة
+      if (s > 0) {
+        setImportText('');
+        await new Promise(r => setTimeout(r, 200));
+        await fetchAccounts();
+      }
+    } catch (err) {
+      setImportResult({ parsed: 0, success: 0, failed: 1, errors: [{ email: '', error: String(err) }] });
     } finally { setImporting(false); }
+  };
+
+  const closeImportModal = () => {
+    setShowImport(false);
+    setImportText('');
+    setImportResult(null);
   };
 
   const clearAll = async () => {
@@ -1061,9 +1082,11 @@ export default function AppPage() {
 
       {/* ══ IMPORT MODAL ═════════════════════════════════════ */}
       {showImport && (
-        <div style={{ position:'fixed', inset:0, zIndex:60, display:'flex', alignItems:'center', justifyContent:'center', padding:24 }} onClick={() => setShowImport(false)}>
+        <div style={{ position:'fixed', inset:0, zIndex:60, display:'flex', alignItems:'center', justifyContent:'center', padding:24 }} onClick={closeImportModal}>
           <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.65)', backdropFilter:'blur(10px)' }} />
           <div className="slide-up" onClick={e => e.stopPropagation()} style={{ position:'relative', width:'100%', maxWidth:540, background:'rgba(10,15,26,0.97)', borderRadius:20, padding:28, border:`1px solid rgba(59,130,246,0.15)`, boxShadow:'0 24px 60px rgba(0,0,0,0.6)' }}>
+
+            {/* Header */}
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:18 }}>
               <div style={{ display:'flex', alignItems:'center', gap:10 }}>
                 <div style={{ width:36, height:36, borderRadius:10, background:'rgba(59,130,246,0.1)', border:'1px solid rgba(59,130,246,0.2)', display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -1071,31 +1094,83 @@ export default function AppPage() {
                 </div>
                 <div>
                   <h2 style={{ fontSize:16, fontWeight:800, color: C.text1 }}>Import Accounts</h2>
-                  <p style={{ fontSize:11, color: C.text3, marginTop:1 }}>Paste your account data below</p>
+                  <p style={{ fontSize:11, color: C.text3, marginTop:1 }}>
+                    {importResult ? `Parsed ${importResult.parsed} · ${importResult.success} added · ${importResult.failed} failed` : 'Paste your account data below'}
+                  </p>
                 </div>
               </div>
-              <button onClick={() => setShowImport(false)} style={{ width:30, height:30, borderRadius:8, border:`1px solid ${C.border}`, cursor:'pointer', background:'rgba(255,255,255,0.04)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+              <button onClick={closeImportModal} style={{ width:30, height:30, borderRadius:8, border:`1px solid ${C.border}`, cursor:'pointer', background:'rgba(255,255,255,0.04)', display:'flex', alignItems:'center', justifyContent:'center' }}>
                 <X style={{ width:14, height:14, color: C.text3 }} />
               </button>
             </div>
-            <div style={{ padding:'10px 14px', borderRadius:10, background:'rgba(59,130,246,0.05)', border:'1px solid rgba(59,130,246,0.1)', marginBottom:16 }}>
-              <p style={{ fontSize:11, color:'#60a5fa', fontWeight:600, marginBottom:4 }}>FORMAT</p>
-              <code style={{ fontSize:11, color:'#93c5fd', fontFamily:"'JetBrains Mono', monospace" }}>email|password|refresh_token|client_id</code>
-              <p style={{ fontSize:10, color: C.text3, marginTop:4 }}>One account per line · Fields separated by | or ----</p>
-            </div>
-            <textarea value={importText} onChange={e => setImportText(e.target.value)}
-              placeholder={'user@hotmail.com|password|M.C531_SN1...|9e5f94bc-e8a4-4e73-b8be-63364c29d753'} rows={7}
-              style={{ width:'100%', padding:14, borderRadius:10, border:`1px solid rgba(59,130,246,0.12)`, background:'rgba(255,255,255,0.03)', fontSize:12, fontFamily:"'JetBrains Mono', monospace", color: C.text1, outline:'none', resize:'vertical', lineHeight:1.6 }}
-            />
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:14 }}>
-              <span style={{ fontSize:11, color: C.text3 }}>{importText.trim().split('\n').filter(Boolean).length} lines</span>
-              <div style={{ display:'flex', gap:8 }}>
-                <button onClick={() => setShowImport(false)} style={{ padding:'9px 20px', borderRadius:9, border:`1px solid ${C.border}`, background:'transparent', color: C.text2, fontSize:13, fontWeight:600, cursor:'pointer' }}>Cancel</button>
-                <button onClick={handleImport} disabled={importing || !importText.trim()} style={{ padding:'9px 22px', borderRadius:9, border:'none', background:'linear-gradient(135deg, #3b82f6, #6366f1)', color:'white', fontSize:13, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:6, opacity: !importText.trim() ? 0.4 : 1, boxShadow:'0 4px 16px rgba(59,130,246,0.3)', transition:'all 0.2s' }}>
-                  {importing ? <><div style={{ width:14, height:14, border:'2px solid rgba(255,255,255,0.3)', borderTopColor:'white', borderRadius:'50%', animation:'spin 0.7s linear infinite' }} /> Importing...</> : <><Download style={{ width:14, height:14 }} /> Import</>}
-                </button>
+
+            {/* ── Result screen ── */}
+            {importResult ? (
+              <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+                {/* Stats row */}
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+                  <div style={{ padding:'12px 0', borderRadius:12, background:'rgba(59,130,246,0.07)', border:'1px solid rgba(59,130,246,0.15)', textAlign:'center' }}>
+                    <p style={{ fontSize:22, fontWeight:900, color: C.blue }}>{importResult.parsed}</p>
+                    <p style={{ fontSize:10, color: C.text3, fontWeight:600, marginTop:2 }}>PARSED</p>
+                  </div>
+                  <div style={{ padding:'12px 0', borderRadius:12, background:'rgba(16,185,129,0.07)', border:'1px solid rgba(16,185,129,0.15)', textAlign:'center' }}>
+                    <p style={{ fontSize:22, fontWeight:900, color: C.green }}>{importResult.success}</p>
+                    <p style={{ fontSize:10, color: C.text3, fontWeight:600, marginTop:2 }}>ADDED ✓</p>
+                  </div>
+                  <div style={{ padding:'12px 0', borderRadius:12, background: importResult.failed > 0 ? 'rgba(239,68,68,0.07)' : 'rgba(16,185,129,0.04)', border:`1px solid ${importResult.failed > 0 ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.1)'}`, textAlign:'center' }}>
+                    <p style={{ fontSize:22, fontWeight:900, color: importResult.failed > 0 ? C.red : C.green }}>{importResult.failed}</p>
+                    <p style={{ fontSize:10, color: C.text3, fontWeight:600, marginTop:2 }}>FAILED</p>
+                  </div>
+                </div>
+
+                {/* Errors list */}
+                {importResult.errors.length > 0 && (
+                  <div style={{ maxHeight:160, overflowY:'auto', borderRadius:10, border:'1px solid rgba(239,68,68,0.15)', background:'rgba(239,68,68,0.04)' }}>
+                    {importResult.errors.map((err, i) => (
+                      <div key={i} style={{ padding:'8px 14px', borderBottom: i < importResult.errors.length-1 ? '1px solid rgba(239,68,68,0.08)' : 'none' }}>
+                        {err.email && <span style={{ fontSize:11, color:'#fca5a5', fontFamily:"'JetBrains Mono',monospace", marginRight:8 }}>{err.email}</span>}
+                        <span style={{ fontSize:11, color:'#f87171' }}>{err.error}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Result actions */}
+                <div style={{ display:'flex', gap:8, marginTop:4 }}>
+                  {importResult.success > 0 ? (
+                    <button onClick={closeImportModal} style={{ flex:1, padding:'10px 0', borderRadius:9, border:'none', background:'linear-gradient(135deg, #059669, #10b981)', color:'white', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+                      ✓ Done — {importResult.success} accounts added
+                    </button>
+                  ) : (
+                    <button onClick={() => setImportResult(null)} style={{ flex:1, padding:'10px 0', borderRadius:9, border:`1px solid ${C.border}`, background:'transparent', color: C.text2, fontSize:13, fontWeight:600, cursor:'pointer' }}>
+                      ← Try Again
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
+            ) : (
+              /* ── Input screen ── */
+              <>
+                <div style={{ padding:'10px 14px', borderRadius:10, background:'rgba(59,130,246,0.05)', border:'1px solid rgba(59,130,246,0.1)', marginBottom:16 }}>
+                  <p style={{ fontSize:11, color:'#60a5fa', fontWeight:600, marginBottom:4 }}>FORMAT</p>
+                  <code style={{ fontSize:11, color:'#93c5fd', fontFamily:"'JetBrains Mono', monospace" }}>email|password|refresh_token|client_id</code>
+                  <p style={{ fontSize:10, color: C.text3, marginTop:4 }}>One account per line · | or ---- separator · numbered lines OK</p>
+                </div>
+                <textarea value={importText} onChange={e => setImportText(e.target.value)}
+                  placeholder={'user@hotmail.com|password|M.C531_SN1...|9e5f94bc-e8a4-4e73-b8be-63364c29d753'} rows={7}
+                  style={{ width:'100%', padding:14, borderRadius:10, border:`1px solid rgba(59,130,246,0.12)`, background:'rgba(255,255,255,0.03)', fontSize:12, fontFamily:"'JetBrains Mono', monospace", color: C.text1, outline:'none', resize:'vertical', lineHeight:1.6 }}
+                />
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:14 }}>
+                  <span style={{ fontSize:11, color: C.text3 }}>{importText.trim().split('\n').filter(Boolean).length} lines</span>
+                  <div style={{ display:'flex', gap:8 }}>
+                    <button onClick={closeImportModal} style={{ padding:'9px 20px', borderRadius:9, border:`1px solid ${C.border}`, background:'transparent', color: C.text2, fontSize:13, fontWeight:600, cursor:'pointer' }}>Cancel</button>
+                    <button onClick={handleImport} disabled={importing || !importText.trim()} style={{ padding:'9px 22px', borderRadius:9, border:'none', background:'linear-gradient(135deg, #3b82f6, #6366f1)', color:'white', fontSize:13, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:6, opacity: !importText.trim() ? 0.4 : 1, boxShadow:'0 4px 16px rgba(59,130,246,0.3)', transition:'all 0.2s' }}>
+                      {importing ? <><div style={{ width:14, height:14, border:'2px solid rgba(255,255,255,0.3)', borderTopColor:'white', borderRadius:'50%', animation:'spin 0.7s linear infinite' }} /> Importing...</> : <><Download style={{ width:14, height:14 }} /> Import</>}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
