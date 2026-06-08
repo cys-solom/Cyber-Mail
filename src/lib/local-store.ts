@@ -154,11 +154,12 @@ export const accountsStore = {
     encrypted_refresh_token: string;
     status?: AccountStatus;
     health_score?: number;
-  }[]): Promise<{ success: number; failed: number; errors: { email: string; error: string }[] }> {
+  }[]): Promise<{ success: number; failed: number; errors: { email: string; error: string }[]; importedIds: string[] }> {
     const all = await getAccounts();
     let success = 0;
     let failed = 0;
     const errors: { email: string; error: string }[] = [];
+    const importedIds: string[] = [];
 
     for (const data of items) {
       try {
@@ -175,8 +176,10 @@ export const accountsStore = {
             encrypted_refresh_token: data.encrypted_refresh_token,
             status:                  data.status ?? 'active',
             health_score:            data.health_score ?? 100,
+            is_used:                 false,   // ريست عند إعادة الاستيراد
             updated_at:              now(),
           });
+          importedIds.push(existing.id);
           success++;
         } else {
           all.push({
@@ -199,6 +202,7 @@ export const accountsStore = {
             created_at:               now(),
             updated_at:               now(),
           });
+          importedIds.push(getStableId(data.email));
           success++;
         }
       } catch (err: unknown) {
@@ -209,7 +213,7 @@ export const accountsStore = {
 
     // حفظ مرة واحدة فقط بعد إدخال كل الحسابات
     if (success > 0) await persistAccounts();
-    return { success, failed, errors };
+    return { success, failed, errors, importedIds };
   },
 
   async update(id: string, patch: Record<string, unknown>): Promise<AccountRecord | null> {

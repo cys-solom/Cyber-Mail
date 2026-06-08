@@ -39,7 +39,7 @@ export default function AppPage() {
   const [showImport,    setShowImport]      = useState(false);
   const [importText,    setImportText]      = useState('');
   const [importing,     setImporting]       = useState(false);
-  const [importResult,  setImportResult]    = useState<{parsed:number;success:number;failed:number;errors:{email:string;error:string}[]} | null>(null);
+  const [importResult,  setImportResult]    = useState<{parsed:number;success:number;failed:number;errors:{email:string;error:string}[];importedIds:string[]} | null>(null);
   const [searchQuery,   setSearchQuery]     = useState('');
   const [accountSearchQuery, setAccountSearchQuery] = useState('');
   const [senderFilter,  setSenderFilter]    = useState('');
@@ -407,7 +407,7 @@ export default function AppPage() {
 
       console.log(`[import] found ${items.length} accounts from ${lines.length} lines`);
       if (items.length === 0) {
-        setImportResult({ parsed: 0, success: 0, failed: lines.filter(Boolean).length, errors: [{ email: '', error: 'لم يتم العثور على أكونتات صحيحة — تأكد من الصيغة' }] });
+        setImportResult({ parsed: 0, success: 0, failed: lines.filter(Boolean).length, errors: [{ email: '', error: 'لم يتم العثور على أكونتات صحيحة — تأكد من الصيغة' }], importedIds: [] });
         return;
       }
 
@@ -415,10 +415,11 @@ export default function AppPage() {
       const importData = await importRes.json();
       console.log('[import result]', importData);
 
-      const s    = importData.data?.success ?? 0;
-      const f    = importData.data?.failed  ?? 0;
-      const errs = importData.data?.errors  ?? [];
-      setImportResult({ parsed: items.length, success: s, failed: f, errors: errs });
+      const s    = importData.data?.success    ?? 0;
+      const f    = importData.data?.failed     ?? 0;
+      const errs = importData.data?.errors     ?? [];
+      const ids  = importData.data?.importedIds ?? [];
+      setImportResult({ parsed: items.length, success: s, failed: f, errors: errs, importedIds: ids });
 
       // ✅ حفظ backup في localStorage
       const existing: Record<string,typeof items[0]> = JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
@@ -426,15 +427,31 @@ export default function AppPage() {
       localStorage.setItem('ds_import_backup', JSON.stringify(existing));
 
     } catch (err) {
-      setImportResult({ parsed: 0, success: 0, failed: 1, errors: [{ email: '', error: String(err) }] });
+      setImportResult({ parsed: 0, success: 0, failed: 1, errors: [{ email: '', error: String(err) }], importedIds: [] });
     } finally { setImporting(false); }
   };
 
   const closeImportModal = async () => {
-    const hadSuccess = importResult && importResult.success > 0;
+    const hadSuccess   = importResult && importResult.success > 0;
+    const importedIds  = importResult?.importedIds ?? [];
     setShowImport(false);
     setImportText('');
     setImportResult(null);
+
+    if (hadSuccess && importedIds.length > 0) {
+      // امسح الـ IDs المستوردة من ds_used و ds_activated في localStorage
+      try {
+        const usedArr: string[]      = JSON.parse(localStorage.getItem('ds_used')      || '[]');
+        const actArr:  string[]      = JSON.parse(localStorage.getItem('ds_activated') || '[]');
+        const idSet = new Set(importedIds);
+        localStorage.setItem('ds_used',      JSON.stringify(usedArr.filter(id => !idSet.has(id))));
+        localStorage.setItem('ds_activated', JSON.stringify(actArr.filter(id => !idSet.has(id))));
+        // حدّث React state مباشرة
+        setUsedAccounts(prev      => { const n = new Set(prev);      importedIds.forEach(id => n.delete(id)); return n; });
+        setActivatedAccounts(prev => { const n = new Set(prev);      importedIds.forEach(id => n.delete(id)); return n; });
+      } catch {}
+    }
+
     // تحديث القائمة بعد إغلاق المودال مباشرة
     if (hadSuccess) {
       await fetchAccounts();
