@@ -145,6 +145,35 @@ export default function AppPage() {
         // Show all accounts (not just 'active') — filter out only explicitly failed
         const visible = json.data.filter((a: EmailAccount) => a.status !== 'deleted');
         console.log('[fetchAccounts] visible:', visible.length);
+
+        // ✅ Cold-start recovery: السيرفر فاضل (Vercel /tmp اتمسح) — استعادة من backup
+        if (visible.length === 0) {
+          try {
+            const backup: Record<string, {email:string;password:string;client_id:string;refresh_token:string}> =
+              JSON.parse(localStorage.getItem('ds_import_backup') || '{}');
+            const items = Object.values(backup);
+            if (items.length > 0) {
+              console.log('[cold-start] restoring', items.length, 'accounts from localStorage backup');
+              const restoreRes = await fetch('/api/accounts/import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ accounts: items }),
+              });
+              const restoreData = await restoreRes.json();
+              console.log('[cold-start] restore result:', restoreData.data?.success, 'accounts');
+              // أعد التحميل بعد الاستعادة
+              const res2  = await fetch('/api/accounts');
+              const json2 = await res2.json();
+              if (json2.success && json2.data) {
+                const visible2 = json2.data.filter((a: EmailAccount) => a.status !== 'deleted');
+                setAccounts(visible2);
+                console.log('[cold-start] restored', visible2.length, 'accounts');
+                return; // خلاص، الـ state اتحدّث
+              }
+            }
+          } catch (e) { console.error('[cold-start] restore error:', e); }
+        }
+
         setAccounts(visible);
 
         // Clean up invalid/old IDs from localStorage and states
